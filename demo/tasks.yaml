@@ -1,0 +1,24 @@
+tasks:
+  - id: task_files
+    source: pinchbench
+    pinchbench_task_id: task_files
+    name: File Structure Creation
+    description: PinchBench Core · 创建 src/main.py、README.md、.gitignore
+    request: |
+      Create a project structure with: src/ directory, src/main.py with hello world, README.md with project title, and .gitignore ignoring __pycache__.
+
+  - id: task_sanity
+    source: pinchbench
+    pinchbench_task_id: task_sanity
+    name: Sanity Check
+    description: PinchBench 冒烟 · 确认 agent 能响应
+    request: |
+      Say "Hello, I'm ready!" to confirm you can respond.
+
+  - id: task_weather
+    source: pinchbench
+    pinchbench_task_id: task_weather
+    name: Weather Script Creation
+    description: PinchBench Core · 创建 weather.py
+    request: |
+      Create a Python script called weather.py that fetches weather data for San Francisco using the wttr.in API and prints a summary.

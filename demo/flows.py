@@ -1,0 +1,375 @@
+"""Demo flows: local direct vs cloud-edge plan/execute/audit."""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+from dataclasses import dataclass, field
+from typing import Any, Literal
+
+from crewai import Agent, Crew, Process, Task
+from pydantic import ValidationError
+
+from demo.events import StageCallback, StageEmitter, preview_text
+from demo.pinchbench_rubric import rubric_payload
+from demo.pinchbench_scoring import GradeMode, PinchBenchGrade, grade_pinchbench_task
+from demo.run_registry import RunCancelled, check_cancelled, get, set_a2a_proc
+from demo.scoring import score_case
+from flow_env import build_llm, edge_worker_workspace, new_run_id
+from openclaw_a2a_client import send_a2a_message
+from prompts import (
+    build_audit_prompt,
+    build_planning_prompt_for_m1c,
+    build_rework_execution_prompt,
+    enrich_prompt_with_plan,
+)
+from schemas import AuditReport
+
+JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
+
+DemoMode = Literal["local_direct", "cloud_edge"]
+
+
+@dataclass
+class DemoRunState:
+    run_id: str = ""
+    mode: DemoMode = "local_direct"
+    task_id: str = ""
+    pinchbench_task_id: str = ""
+    user_request: str = ""
+    plan_text: str = ""
+    execution_result: str = ""
+    audit_report: AuditReport | None = None
+    grade: PinchBenchGrade | None = None
+    pass_score: int = 7
+    max_reworks: int = 1
+    rework_count: int = 0
+    final_output: str = ""
+
+
+class DemoRunner:
+    def __init__(
+        self,
+        *,
+        mode: DemoMode,
+        task: dict[str, Any],
+        on_stage: StageCallback | None = None,
+        pass_score: int = 7,
+        max_reworks: int = 1,
+    ) -> None:
+        pb_id = str(task.get("pinchbench_task_id") or "")
+        if not pb_id and task.get("source") == "pinchbench":
+            pb_id = str(task.get("id") or "")
+        self.state = DemoRunState(
+            run_id=new_run_id(),
+            mode=mode,
+            task_id=str(task["id"]),
+            pinchbench_task_id=pb_id,
+            user_request=str(task["request"]).strip(),
+            pass_score=pass_score,
+            max_reworks=max_reworks,
+        )
+        self.emitter = StageEmitter(self.state.run_id, on_stage)
+        self._workspace = edge_worker_workspace()
+
+    @staticmethod
+    def _parse_audit_report(crew_result: object) -> AuditReport:
+        if hasattr(crew_result, "pydantic") and crew_result.pydantic is not None:
+            return AuditReport.model_validate(crew_result.pydantic)
+        raw = getattr(crew_result, "raw", None) or str(crew_result)
+        if isinstance(raw, dict):
+            return AuditReport.model_validate(raw)
+        text = str(raw)
+        match = JSON_OBJECT_RE.search(text)
+        if not match:
+            raise ValueError(f"Auditor did not return JSON: {text[:500]}")
+        data = json.loads(match.group(0))
+        return AuditReport.model_validate(data)
+
+    def _execution_prompt(self, *, rework: bool = False) -> str:
+        if self.state.mode == "cloud_edge":
+            if rework and self.state.audit_report is not None:
+                return build_rework_execution_prompt(
+                    self.state.user_request,
+                    self.state.plan_text,
+                    self.state.execution_result,
+                    self.state.audit_report,
+                    workspace_path=self._workspace,
+                )
+            return enrich_prompt_with_plan(
+                self.state.user_request,
+                self.state.plan_text,
+                workspace_path=self._workspace,
+            )
+        return enrich_prompt_with_plan(
+            self.state.user_request,
+            "",
+            workspace_path=self._workspace,
+        )
+
+    def kickoff(self) -> DemoRunState:
+        try:
+            if self.state.mode == "cloud_edge":
+                return self._run_cloud_edge()
+            self.emitter.skip("recall", message="Demo 模式不启用记忆召回")
+            self.emitter.skip("plan", message="本地直连：跳过云端规划")
+            self.emitter.skip("audit", message="本地直连：跳过 PinchBench LLM Judge")
+            return self._run_local_direct()
+        except RunCancelled:
+            self._emit_cancelled()
+            return self.state
+
+    def _guard_cancel(self) -> None:
+        check_cancelled(self.state.run_id)
+
+    def _run_local_direct(self) -> DemoRunState:
+        self._guard_cancel()
+        try:
+            self._run_execute(prompt=self._execution_prompt())
+        except RunCancelled:
+            raise
+        except Exception:
+            if not self.state.execution_result:
+                self.state.execution_result = ""
+        self._guard_cancel()
+        grade = self._grade(mode="automated_only")
+        self._emit_score(grade)
+        return self.state
+
+    def _run_cloud_edge(self) -> DemoRunState:
+        self.emitter.skip("recall", message="Demo 简化：未接 memory-server")
+        self._guard_cancel()
+        self._run_plan()
+
+        while True:
+            self._guard_cancel()
+            rework = self.state.rework_count > 0 and self.state.audit_report is not None
+            try:
+                self._run_execute(prompt=self._execution_prompt(rework=rework))
+            except RunCancelled:
+                raise
+            except Exception:
+                if not self.state.execution_result:
+                    self.state.execution_result = ""
+            self._guard_cancel()
+            self._run_audit()
+            grade = self._grade(mode="full")
+            audit_ok = (
+                self.state.audit_report is not None
+                and self.state.audit_report.passed(self.state.pass_score)
+            )
+            if audit_ok and grade.combined_pass:
+                self._emit_score(grade)
+                return self.state
+            if self.state.rework_count >= self.state.max_reworks:
+                self._emit_score(grade)
+                return self.state
+            self.state.rework_count += 1
+            hints = self.state.audit_report.rework_hints if self.state.audit_report else ""
+            self.emitter.running(
+                "execute",
+                message=f"审计/评分未通过，rework {self.state.rework_count}/{self.state.max_reworks}",
+                payload={
+                    **grade.to_score_payload(),
+                    "audit_pass": audit_ok,
+                    "rework_hints": hints,
+                },
+            )
+
+    def _grade(self, *, mode: GradeMode) -> PinchBenchGrade:
+        if self.state.pinchbench_task_id:
+            grade = grade_pinchbench_task(
+                self.state.pinchbench_task_id,
+                execution_result=self.state.execution_result,
+                mode=mode,
+            )
+        else:
+            grade = self._fallback_grade()
+        self.state.grade = grade
+        return grade
+
+    def _fallback_grade(self) -> PinchBenchGrade:
+        report = score_case(
+            self.state.task_id,
+            {},
+            execution_result=self.state.execution_result,
+            pass_score=self.state.pass_score,
+        )
+        combined = report.score / 10.0
+        threshold = self.state.pass_score / 10.0
+        return PinchBenchGrade(
+            task_id=self.state.task_id,
+            grading_type="generic",
+            combined_score=combined,
+            combined_pass=report.passed(self.state.pass_score),
+            pass_threshold=threshold,
+            automated_score=combined,
+            llm_judge_score=None,
+            breakdown={"rule_score": combined},
+            notes=report.summary,
+            issues=report.issues,
+        )
+
+    def _run_audit(self) -> AuditReport:
+        self.emitter.running("audit", message="DeepSeek main-audit 审计执行结果…")
+        llm = build_llm()
+        auditor = Agent(
+            role="审计员",
+            goal="评审边侧是否实际完成任务，拒绝只提问不执行的汇报",
+            backstory="你是严格的 main-audit 审计员，只评审不改文件。",
+            llm=llm,
+            verbose=False,
+        )
+        audit_prompt = build_audit_prompt(
+            self.state.user_request,
+            self.state.plan_text,
+            self.state.execution_result,
+            pass_score=self.state.pass_score,
+        )
+        audit_task = Task(
+            description=audit_prompt,
+            expected_output="JSON audit report",
+            agent=auditor,
+            output_pydantic=AuditReport,
+        )
+        crew = Crew(agents=[auditor], tasks=[audit_task], process=Process.sequential, verbose=False)
+        try:
+            report = self._parse_audit_report(crew.kickoff())
+        except (ValueError, ValidationError, json.JSONDecodeError) as exc:
+            self.emitter.fail("audit", message=f"审计解析失败: {exc}")
+            report = AuditReport(
+                pass_=False,
+                score=0,
+                summary=str(exc),
+                issues=["审计 JSON 解析失败"],
+                rework_hints="",
+            )
+
+        self.state.audit_report = report
+        payload = {
+            "pass": report.pass_,
+            "score": report.score,
+            "summary": report.summary,
+            "issues": report.issues,
+            "rework_hints": report.rework_hints,
+        }
+        if report.passed(self.state.pass_score):
+            self.emitter.pass_("audit", message=f"审计 score={report.score}/10", payload=payload)
+        else:
+            self.emitter.fail("audit", message=f"审计 score={report.score}/10", payload=payload)
+        return report
+
+    def _run_plan(self) -> None:
+        self._guard_cancel()
+        self.emitter.running("plan", message="DeepSeek 生成结构化计划…")
+        llm = build_llm()
+        planner = Agent(
+            role="规划师",
+            goal="输出可供 edge-worker 执行的结构化计划",
+            backstory="你熟悉 M1c 规划规范，只规划不执行。",
+            llm=llm,
+            verbose=False,
+        )
+        prompt = build_planning_prompt_for_m1c(self.state.user_request)
+        result = planner.kickoff(prompt)
+        self._guard_cancel()
+        self.state.plan_text = (result.raw or "").strip()
+        self.emitter.pass_(
+            "plan",
+            message="规划完成",
+            payload={"plan_preview": preview_text(self.state.plan_text, 800)},
+        )
+
+    def _run_execute(self, *, prompt: str) -> None:
+        self.emitter.running(
+            "execute",
+            message="A2A → edge-worker (qwen3.5:0.8b)…",
+            payload={"prompt_preview": preview_text(prompt, 400)},
+        )
+        timeout_s = int(os.environ.get("DEMO_EXECUTE_TIMEOUT_S", "300"))
+        run_id = self.state.run_id
+
+        def _should_cancel() -> bool:
+            active = get(run_id)
+            return active is not None and active.cancel.is_set()
+
+        try:
+            result = send_a2a_message(
+                text=prompt,
+                blocking=True,
+                timeout_s=timeout_s,
+                should_cancel=_should_cancel,
+                on_proc=lambda proc: set_a2a_proc(run_id, proc),
+            )
+            self.state.execution_result = result.text.strip()
+            self.emitter.pass_(
+                "execute",
+                message="边侧执行完成",
+                payload={"execution_preview": preview_text(self.state.execution_result)},
+            )
+        except RunCancelled:
+            raise
+        except Exception as exc:
+            if _should_cancel() or "cancelled by user" in str(exc).lower():
+                raise RunCancelled("用户已终止任务") from exc
+            self.state.execution_result = str(exc)
+            self.emitter.fail(
+                "execute",
+                message=f"执行失败: {exc}",
+                payload={"error": str(exc)},
+            )
+            raise
+        finally:
+            set_a2a_proc(run_id, None)
+
+    def _emit_cancelled(self) -> None:
+        self.emitter.fail(
+            "execute",
+            message="已终止",
+            payload={"cancelled": True},
+        )
+        self.emitter.fail(
+            "done",
+            message="用户已终止任务",
+            payload={"cancelled": True, "mode": self.state.mode, "task_id": self.state.task_id},
+        )
+
+    def _emit_score(self, grade: PinchBenchGrade) -> None:
+        payload = grade.to_score_payload()
+        if self.state.pinchbench_task_id:
+            try:
+                payload["rubric"] = rubric_payload(
+                    self.state.pinchbench_task_id,
+                    mode=self.state.mode,
+                )
+            except FileNotFoundError:
+                pass
+        pct = grade.combined_score * 100
+        passed = grade.combined_pass
+        audit = self.state.audit_report
+        audit_line = ""
+        if audit is not None:
+            audit_line = f"Audit: {audit.score}/10 pass={audit.passed(self.state.pass_score)}\n{audit.summary}\n"
+        self.state.final_output = (
+            f"{self.state.execution_result}\n\n---\n"
+            f"{audit_line}"
+            f"PinchBench {grade.combined_score:.3f}/1.0 "
+            f"(threshold {grade.pass_threshold}) pass={passed}\n"
+            f"{grade.notes}"
+        )
+        msg = f"{'通过' if passed else '未通过'} · {pct:.0f}% ({grade.combined_score:.3f}/1.0)"
+        if passed:
+            self.emitter.pass_("score", message=msg, payload=payload)
+        else:
+            self.emitter.fail("score", message=msg, payload=payload)
+        self.emitter.pass_(
+            "done",
+            message="运行结束",
+            payload={
+                "mode": self.state.mode,
+                "task_id": self.state.task_id,
+                "pinchbench_task_id": self.state.pinchbench_task_id,
+                "final_preview": preview_text(self.state.final_output, 1500),
+            },
+        )
