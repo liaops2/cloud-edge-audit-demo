@@ -38,6 +38,17 @@
 
 ### 3.2 检查命令
 
+推荐一键检查（覆盖本节与 §9 Checklist）：
+
+```bash
+bash scripts/check-demo-env.sh              # 全部项
+bash scripts/check-demo-env.sh --profile local   # 机器 A
+bash scripts/check-demo-env.sh --profile cloud   # 机器 B
+bash scripts/check-demo-env.sh --strict     # 警告也视为失败
+```
+
+手动抽查：
+
 ```bash
 ollama list | grep 'qwen3.5:0.8b'
 curl -sf http://127.0.0.1:18800/.well-known/agent-card.json | head -c 80
@@ -206,6 +217,7 @@ lsof -ti :8765 | xargs -r kill
 
 ## 9. 演示前检查清单（Checklist）
 
+- [ ] 运行 `bash scripts/check-demo-env.sh` 全部通过（或 `--profile local` / `cloud`）
 - [ ] 两台均已 `git pull` 最新 Demo
 - [ ] Ollama `qwen3.5:0.8b` 就绪
 - [ ] OpenClaw Gateway + A2A `:18800` 正常

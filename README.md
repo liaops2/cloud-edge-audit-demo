@@ -19,9 +19,14 @@ bash scripts/start-demo-local.sh
 
 # 机器 B（需 SiliconFlow）
 bash scripts/start-demo-cloud.sh
+
+# 演示前环境检查（两台通用）
+bash scripts/check-demo-env.sh
+bash scripts/check-demo-env.sh --profile cloud   # 仅机器 B
 ```
 
-详细步骤见 [SOP.md](./SOP.md)。
+详细步骤见 [SOP.md](./SOP.md)。  
+**现场讲解分镜稿**见 [DEMO_SCRIPT.md](./DEMO_SCRIPT.md)（PPT + 双机 Demo 口播脚本）。
 
 ## 目录
 
