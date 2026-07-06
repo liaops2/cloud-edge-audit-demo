@@ -9,8 +9,8 @@
 
 | 机器 | 模式 | 规划 | 执行 | 审计/评分 |
 |------|------|------|------|-----------|
-| **机器 A** | 本地直连 | 跳过 | A2A → edge-worker (0.8b) | PinchBench automated only |
-| **机器 B** | 端云规划+审计 | DeepSeek | A2A → edge-worker (0.8b) | main-audit + PinchBench |
+| **机器 A** | 本地直连 | 跳过 | A2A → edge-worker (0.8b-64k) | PinchBench automated only |
+| **机器 B** | 端云规划+审计 | DeepSeek | A2A → edge-worker (0.8b-64k) | main-audit + PinchBench |
 
 **对比要点**：同一 PinchBench 官方 Prompt（推荐 `task_files`），边侧模型相同，差异在是否有结构化规划与云端审计。
 
@@ -31,9 +31,9 @@
 ### 3.1 软件
 
 - [uv](https://docs.astral.sh/uv/)（Python 包管理）
-- [Ollama](https://ollama.com/)，已拉取 **`qwen3.5:0.8b`**
+- [Ollama](https://ollama.com/)，已创建 **`qwen3.5:0.8b-64k-demo`**
 - [OpenClaw](https://github.com/openclaw/openclaw) Gateway + **a2a-gateway** 插件（`:18800`）
-- `edge-worker` agent，模型指向 `qwen3.5:0.8b`
+- `edge-worker` agent，模型指向 `qwen3.5:0.8b-64k-demo`
 - [PinchBench skill](https://github.com/pinchbench/skill) 克隆到本机，例如 `~/skill`
 
 ### 3.2 检查命令
@@ -50,7 +50,7 @@ bash scripts/check-demo-env.sh --strict     # 警告也视为失败
 手动抽查：
 
 ```bash
-ollama list | grep 'qwen3.5:0.8b'
+ollama list | grep 'qwen3.5:0.8b-64k-demo'
 curl -sf http://127.0.0.1:18800/.well-known/agent-card.json | head -c 80
 openclaw gateway status
 test -f ~/skill/tasks/task_files.md && echo "PinchBench OK"
@@ -58,7 +58,7 @@ test -f ~/skill/tasks/task_files.md && echo "PinchBench OK"
 
 ### 3.3 edge-worker 模型（演示期间）
 
-确认 `~/.openclaw/openclaw.json` 中 `edge-worker` 使用 `qwen3.5:0.8b`（或演示专用配置）。  
+确认 `~/.openclaw/openclaw.json` 中 `edge-worker` 使用 `qwen3.5:0.8b-64k-demo`（或演示专用配置）。  
 演示脚本**不会**修改 OpenClaw 源码，仅做启动前警告。
 
 ### 3.4 机器 B 额外依赖

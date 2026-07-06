@@ -65,8 +65,8 @@ def _default_mode() -> DemoMode:
 
 def _profile_label(mode: DemoMode) -> str:
     if mode == "cloud_edge":
-        return "机器 B · 端云规划+审计（DeepSeek）"
-    return "机器 A · 本地直连（无规划/审计）"
+        return "机器 B · 端云审计（云端规划/审计门禁）"
+    return "机器 A · 本地 Agent（直连执行）"
 
 
 @app.get("/api/config")

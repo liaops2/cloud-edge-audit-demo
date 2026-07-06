@@ -15,14 +15,34 @@ let activeRunId = null;
 let activeEs = null;
 let pinchbenchTasks = [];
 let selectedPromptTaskId = "task_files";
+let welcomeBubbleEl = null;
+let modeSummaryEl = null;
 
 const DEFAULT_OFFICIAL_PROMPT = `Create a project structure with: src/ directory, src/main.py with hello world, README.md with project title, and .gitignore ignoring __pycache__.`;
 
 const MODE_HINTS = {
-  local_direct:
-    "本地直连：跳过规划与云端审计，任务原文经 A2A 直发 edge-worker，最后用规则评分。",
-  cloud_edge:
-    "端云规划+审计：DeepSeek 生成计划 → edge-worker 执行 → DeepSeek 审计评分。",
+  local_direct: "OpenClaw + Qwen 0.8B 64K",
+  cloud_edge: "OpenClaw + DeepSeek + Qwen 0.8B 64K",
+};
+
+const MODE_LABELS = {
+  local_direct: "本地 Agent",
+  cloud_edge: "端云审计",
+};
+
+const MODE_RUBRIC_NOTES = {
+  local_direct: "规则评分。",
+  cloud_edge: "规划 + 审计。",
+};
+
+const CRITERIA_SUMMARIES = {
+  "Directory `src/` created": "创建 src/ 目录",
+  "File `src/main.py` created": "创建 src/main.py",
+  "`src/main.py` contains valid Python hello world code": "main.py 能输出 hello world",
+  "File `README.md` created": "创建 README.md",
+  "`README.md` contains a project title/heading": "README.md 包含项目标题",
+  "File `.gitignore` created": "创建 .gitignore",
+  "`.gitignore` contains `__pycache__` entry": ".gitignore 忽略 __pycache__",
 };
 
 function $(id) {
@@ -89,28 +109,12 @@ function setStep(stepEls, stage, status) {
 
 function formatStageDetail(event) {
   const payload = event.payload || {};
+  if (event.stage === "score") return "";
   const parts = [];
   if (payload.plan_preview) parts.push(`【计划】\n${payload.plan_preview}`);
   if (payload.prompt_preview) parts.push(`【下发】\n${payload.prompt_preview}`);
   if (payload.execution_preview) parts.push(`【执行】\n${payload.execution_preview}`);
-  if (payload.summary) parts.push(`【摘要】\n${payload.summary}`);
   if (payload.rework_hints) parts.push(`【返工提示】\n${payload.rework_hints}`);
-  if (payload.breakdown && Object.keys(payload.breakdown).length) {
-    parts.push(
-      "【PinchBench 分项】\n" +
-        Object.entries(payload.breakdown)
-          .map(([k, v]) => `${k}: ${v}`)
-          .join("\n")
-    );
-  }
-  if (payload.llm_breakdown && Object.keys(payload.llm_breakdown).length) {
-    parts.push(
-      "【LLM Judge 分项】\n" +
-        Object.entries(payload.llm_breakdown)
-          .map(([k, v]) => `${k}: ${v}`)
-          .join("\n")
-    );
-  }
   if (payload.issues?.length) parts.push(`【问题】\n${payload.issues.join("\n")}`);
   if (!parts.length && Object.keys(payload).length) {
     parts.push(JSON.stringify(payload, null, 2));
@@ -119,14 +123,17 @@ function formatStageDetail(event) {
 }
 
 function renderRubricPanel(container, rubric, { before } = {}) {
-  if (!rubric || container.querySelector(".rubric-panel")) return null;
+  if (!rubric) return null;
+
+  const existing = container.querySelector(".rubric-panel");
+  if (existing) existing.remove();
 
   const panel = document.createElement("details");
   panel.className = "rubric-panel";
   panel.open = true;
 
   const summary = document.createElement("summary");
-  summary.textContent = `PinchBench 评分标准 · ${rubric.name || rubric.task_id}`;
+  summary.textContent = `评分摘要 · ${rubric.name || rubric.task_id}`;
   panel.appendChild(summary);
 
   const body = document.createElement("div");
@@ -134,47 +141,23 @@ function renderRubricPanel(container, rubric, { before } = {}) {
 
   const meta = document.createElement("p");
   meta.className = "rubric-meta";
-  meta.textContent = [
-    rubric.grading_type ? `类型: ${rubric.grading_type}` : "",
-    rubric.pass_rule || "",
-    rubric.mode_note || "",
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  meta.textContent = summarizePassRule(rubric);
   body.appendChild(meta);
 
-  if (rubric.active_rules?.length) {
-    const rules = document.createElement("p");
-    rules.className = "rubric-active";
-    rules.textContent = `本模式启用: ${rubric.active_rules.join("；")}`;
-    body.appendChild(rules);
-  }
-
   if (rubric.grading_criteria?.length) {
-    body.appendChild(rubricSectionTitle("Grading Criteria"));
+    body.appendChild(rubricSectionTitle("检查要点"));
     const ul = document.createElement("ul");
     ul.className = "rubric-list";
-    ul.innerHTML = rubric.grading_criteria
+    ul.innerHTML = summarizeCriteria(rubric.grading_criteria)
       .map((c) => `<li>${escapeHtml(c)}</li>`)
       .join("");
     body.appendChild(ul);
   }
 
-  if (rubric.expected_behavior) {
-    body.appendChild(rubricSectionTitle("Expected Behavior"));
-    const pre = document.createElement("pre");
-    pre.className = "rubric-text";
-    pre.textContent = rubric.expected_behavior;
-    body.appendChild(pre);
-  }
-
-  if (rubric.llm_judge_rubric) {
-    body.appendChild(rubricSectionTitle("LLM Judge Rubric"));
-    const pre = document.createElement("pre");
-    pre.className = "rubric-text";
-    pre.textContent = rubric.llm_judge_rubric;
-    body.appendChild(pre);
-  }
+  const modeNote = document.createElement("p");
+  modeNote.className = "rubric-mode-note";
+  modeNote.textContent = MODE_RUBRIC_NOTES[rubric.mode || getSelectedMode()];
+  body.appendChild(modeNote);
 
   panel.appendChild(body);
   if (before) {
@@ -183,6 +166,49 @@ function renderRubricPanel(container, rubric, { before } = {}) {
     container.appendChild(panel);
   }
   return panel;
+}
+
+function summarizePassRule(rubric) {
+  if (rubric.task_id === "task_files") {
+    return "通过条件：创建 src/main.py、README.md、.gitignore，且关键内容检查全部通过。";
+  }
+  if (rubric.task_id === "task_weather") {
+    return "通过条件：创建可运行的 weather.py，并能获取旧金山天气数据后输出摘要。";
+  }
+  if (rubric.task_id === "task_sanity") {
+    return "通过条件：Agent 能按要求返回准备就绪的确认消息。";
+  }
+  if (rubric.grading_type === "automated") {
+    return "通过条件：规则检查项全部通过。";
+  }
+  if (rubric.grading_type === "hybrid") {
+    return "通过条件：规则检查和模型评审的综合评分达到门禁。";
+  }
+  return "通过条件：模型评审分数达到门禁。";
+}
+
+function summarizeCriteria(criteria) {
+  if (
+    criteria.includes("File `src/main.py` created") &&
+    criteria.includes("File `.gitignore` created")
+  ) {
+    return [
+      "创建 src/ 目录和 src/main.py",
+      "main.py 能输出 hello world",
+      "创建 README.md",
+      "README.md 包含项目标题",
+      ".gitignore 忽略 __pycache__",
+    ];
+  }
+
+  const summarized = criteria.map((item) => CRITERIA_SUMMARIES[item] || item);
+  if (summarized.length <= 5) return summarized;
+
+  const mustHave = summarized.filter((item) =>
+    /创建|包含|输出|获取|确认|hello world|README|gitignore|weather/i.test(item)
+  );
+  const picked = (mustHave.length ? mustHave : summarized).slice(0, 5);
+  return [...new Set(picked)];
 }
 
 function rubricSectionTitle(text) {
@@ -202,8 +228,11 @@ function renderScoreBlock(container, payload, status) {
   const pct = Math.round(combined * 100);
   const type = payload.pinchbench_type ? ` · ${payload.pinchbench_type}` : "";
   block.innerHTML = `
-    <div class="score-inline__value">${pct}%</div>
-    <div class="score-inline__label">${passed ? "通过" : "未通过"}${type}</div>
+    <div class="score-inline__head">
+      <div class="score-inline__state">${passed ? "通过" : "未通过"}</div>
+      <div class="score-inline__value">${pct}%</div>
+      <div class="score-inline__label">${passed ? "完成" : "评分"}${type}</div>
+    </div>
   `;
   const issues = payload.issues || [];
   if (issues.length) {
@@ -245,38 +274,42 @@ function createAssistantRunBubble() {
   return { bubble, stepEls, statusLine, detail, indicator };
 }
 
-function appendSystemNote(text) {
-  const group = document.createElement("div");
-  group.className = "chat-group system";
-  const bubble = document.createElement("div");
-  bubble.className = "chat-bubble";
-  bubble.textContent = text;
-  group.appendChild(bubble);
-  $("chatThread").appendChild(group);
-  scrollToBottom();
-}
-
 function getSelectedMode() {
   return selectedMode;
 }
 
-function setSelectedMode(mode, { announce = false } = {}) {
+function setSelectedMode(mode) {
   selectedMode = mode;
   $("modeLocal").classList.toggle("active", mode === "local_direct");
   $("modeCloud").classList.toggle("active", mode === "cloud_edge");
-  if (announce) {
-    appendSystemNote(`已切换为：${MODE_HINTS[mode]}`);
-  }
+  renderModeSummary();
+  renderPromptPanel();
+  if (welcomeBubbleEl) loadDefaultRubric(welcomeBubbleEl);
 }
 
 function welcomeMessage() {
   const { group, messages } = createChatGroup("assistant");
-  const bubble = appendBubble(
-    messages,
-    `欢迎使用端云审计 Demo。\n\n评分对齐 PinchBench；运行 PinchBench 任务时会展示完整评分标准（Grading Criteria / Expected Behavior / LLM Rubric）。\n推荐试 task_files。右上角可切换本地直连 / 端云规划+审计。`
-  );
+  const bubble = appendBubble(messages, "");
+  welcomeBubbleEl = bubble;
+  renderModeSummary();
   $("chatThread").appendChild(group);
   loadDefaultRubric(bubble);
+}
+
+function renderModeSummary() {
+  if (!welcomeBubbleEl) return;
+
+  if (!modeSummaryEl) {
+    modeSummaryEl = document.createElement("div");
+    modeSummaryEl.className = "mode-summary";
+    welcomeBubbleEl.appendChild(modeSummaryEl);
+  }
+
+  modeSummaryEl.innerHTML = `
+    <div class="mode-summary__eyebrow">当前对比模式</div>
+    <div class="mode-summary__title">${escapeHtml(MODE_LABELS[selectedMode])}</div>
+    <div class="mode-summary__body">${escapeHtml(MODE_HINTS[selectedMode])}</div>
+  `;
 }
 
 async function loadDefaultRubric(bubbleEl) {
@@ -446,7 +479,6 @@ async function sendMessage() {
 
   const es = new EventSource(`/api/runs/${run_id}/events`);
   activeEs = es;
-  let finalText = "";
 
   es.onmessage = (msg) => {
     let event;
@@ -478,14 +510,6 @@ async function sendMessage() {
     if (event.stage === "done") {
       runUi.bubble.classList.remove("streaming");
       runUi.indicator.remove();
-      const preview = event.payload?.final_preview;
-      if (preview) {
-        finalText = preview;
-        const finalBlock = document.createElement("pre");
-        finalBlock.className = "stage-detail";
-        finalBlock.textContent = preview;
-        runUi.bubble.appendChild(finalBlock);
-      }
       runUi.statusLine.innerHTML = `<strong>完成</strong> · ${escapeHtml(event.message || "运行结束")}`;
       es.close();
       clearActiveRun();
@@ -498,9 +522,7 @@ async function sendMessage() {
     es.close();
     runUi.bubble.classList.remove("streaming");
     runUi.indicator.remove();
-    if (!finalText) {
-      runUi.statusLine.innerHTML = "<strong>中断</strong> SSE 连接断开";
-    }
+    runUi.statusLine.innerHTML = "<strong>中断</strong> SSE 连接断开";
     clearActiveRun();
     setBusy(false);
   };
@@ -516,12 +538,12 @@ $("usePromptBtn").addEventListener("click", fillOfficialPrompt);
 
 $("modeLocal").addEventListener("click", () => {
   if (busy || selectedMode === "local_direct") return;
-  setSelectedMode("local_direct", { announce: true });
+  setSelectedMode("local_direct");
 });
 
 $("modeCloud").addEventListener("click", () => {
   if (busy || selectedMode === "cloud_edge") return;
-  setSelectedMode("cloud_edge", { announce: true });
+  setSelectedMode("cloud_edge");
 });
 
 $("sendBtn").addEventListener("click", () => {

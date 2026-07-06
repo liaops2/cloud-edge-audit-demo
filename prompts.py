@@ -14,7 +14,7 @@ def build_edge_worker_context_card(workspace_path: str | Path) -> str:
     """Worker context card injected before edge execution (M1b/M1c harness parity)."""
     ws = Path(workspace_path).resolve()
     ws_prefix = str(ws)
-    return f"""[Environment Context — edge-worker]
+    return f"""[Environment Context — local execution agent]
 
 ## 可用工具（只能用以下名称调用，其他均不存在）
 - `write` — 写入文件。参数：path, content
@@ -43,16 +43,31 @@ def build_edge_worker_context_card(workspace_path: str | Path) -> str:
 [/Environment Context]"""
 
 
-def build_planning_prompt_for_m1c(user_prompt: str, memory_hits: list[MemoryHit] | None = None) -> str:
+def build_planning_prompt_for_m1c(
+    user_prompt: str,
+    memory_hits: list[MemoryHit] | None = None,
+    *,
+    workspace_path: str | Path | None = None,
+) -> str:
     memory_block = format_memory_injection(memory_hits or [])
+    workspace_block = ""
+    if workspace_path is not None:
+        ws = Path(workspace_path).resolve()
+        workspace_block = f"""
+## 工作目录约束
+- 这次任务的可写 workspace 是：`{ws}`
+- 所有必须落盘的路径都必须使用上面的真实路径前缀
+- 禁止写 `/workspace/...`、`/root/workspace/...`、`~/.openclaw/workspace/...` 或其他不存在的根路径
+- 如果任务只要求创建项目结构，就直接给出上述 workspace 下的相对路径映射
+"""
     base = f"""你是 cloud-main 任务规划器。仅做规划，不要调用 sessions_spawn，不要假装已执行。
 
 请先输出一行：PLAN_DONE
 
-然后输出供边侧 edge-worker 直接执行的结构化计划（中文）：
+然后输出供本地执行 Agent 直接执行的结构化计划（中文）：
 
 ## 1. 交付物
-- 必须落盘的**完整路径**（优先 edge-worker workspace 下）或必须运行的命令
+- 必须落盘的**完整路径**（优先本地执行 Agent workspace 下）或必须运行的命令
 
 ## 2. 步骤
 - 编号列表；每步标明工具：**write / read / exec / edit**（仅此四种）
@@ -71,6 +86,7 @@ def build_planning_prompt_for_m1c(user_prompt: str, memory_hits: list[MemoryHit]
 - 用户要文件 → write + read 验证
 - 用户要命令/脚本 → write 脚本 + exec 运行 + read 验证输出
 - 用户要测磁盘/写文件 → 用 `dd`/`python3` 等，不要虚构 `pinchbench` 命令
+{workspace_block}
 {memory_block}
 用户任务：
 {user_prompt}
@@ -109,6 +125,39 @@ def enrich_prompt_with_plan(
         parts.append(
             "[Audit rework — address these issues before finishing]\n" + rework_hints.strip()
         )
+    return "\n\n".join(parts)
+
+
+def build_local_direct_baseline_prompt(
+    user_prompt: str,
+    *,
+    workspace_path: str | Path | None = None,
+) -> str:
+    parts: list[str] = []
+    if workspace_path is not None:
+        ws = Path(workspace_path).resolve()
+        parts.append(
+            f"""[Local direct baseline context]
+
+可写 workspace: `{ws}`
+但本模式明确禁止实际写入、读取或执行。
+"""
+        )
+    parts.append(
+        """[Local direct baseline]
+
+这是本地直连模式的演示基线，只做口头回应，不实际执行文件、目录或命令操作。
+
+要求：
+- 只回复：收到
+- 不要调用 write / read / exec / edit
+- 不要创建文件、不要修改文件、不要运行命令
+- 不要给出执行计划
+- 不要解释模式限制
+- 不要声称任务已完成
+"""
+    )
+    parts.append(user_prompt.rstrip())
     return "\n\n".join(parts)
 
 

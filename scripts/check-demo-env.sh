@@ -103,10 +103,10 @@ check_common() {
 
   section "通用 · Ollama 边侧模型"
   if command -v ollama >/dev/null 2>&1; then
-    if ollama list 2>/dev/null | grep -q 'qwen3.5:0.8b'; then
-      pass "Ollama 模型 qwen3.5:0.8b 已就绪"
+    if ollama list 2>/dev/null | grep -q 'qwen3.5:0.8b-64k-demo'; then
+      pass "Ollama 模型 qwen3.5:0.8b-64k-demo 已就绪"
     else
-      warn "未找到 qwen3.5:0.8b，请执行: ollama pull qwen3.5:0.8b"
+      warn "未找到 qwen3.5:0.8b-64k-demo，请先创建新模型"
     fi
   else
     fail "未安装 ollama"

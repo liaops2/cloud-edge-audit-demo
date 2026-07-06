@@ -7,8 +7,6 @@ import os
 import uuid
 from pathlib import Path
 
-from crewai import LLM
-
 OPENCLAW_CONFIG = Path.home() / ".openclaw" / "openclaw.json"
 _DEFAULT_ENV = Path.home() / "openclaw-hermes-cloud-edge" / ".env"
 ENV_FILE = Path(os.environ.get("OPENCLAW_ENV_FILE", str(_DEFAULT_ENV)))
@@ -44,8 +42,22 @@ def load_a2a_token() -> str:
     raise RuntimeError("Set LOCAL_A2A_TOKEN or configure a2a-gateway in openclaw.json")
 
 
+def _sanitize_llm_proxy_env() -> None:
+    for key in ("ALL_PROXY", "all_proxy", "HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy"):
+        proxy = os.environ.get(key, "")
+        if proxy.startswith("socks://"):
+            os.environ.pop(key, None)
+
+
+_sanitize_llm_proxy_env()
+os.environ.setdefault("CREWAI_TESTING", "true")
+
+from crewai import LLM
+
+
 def build_llm() -> LLM:
     load_env_file()
+    _sanitize_llm_proxy_env()
     api_key = os.environ.get("SILICONFLOW_API_KEY") or os.environ.get("OPENAI_API_KEY")
     base_url = os.environ.get("SILICONFLOW_BASE_URL") or os.environ.get("OPENAI_API_BASE")
     model = os.environ.get("DEEPSEEK_MODEL", "deepseek-ai/DeepSeek-V4-Flash")
@@ -72,3 +84,10 @@ def edge_worker_workspace() -> Path:
             if agent.get("id") == "edge-worker" and agent.get("workspace"):
                 return Path(agent["workspace"])
     return Path.home() / ".openclaw" / "workspace"
+
+
+def demo_run_workspace(run_id: str) -> Path:
+    base = edge_worker_workspace()
+    run_root = base / ".demo-runs" / run_id
+    run_root.mkdir(parents=True, exist_ok=True)
+    return run_root

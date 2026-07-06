@@ -25,8 +25,8 @@ if [[ -z "${SILICONFLOW_API_KEY:-}" ]]; then
   exit 1
 fi
 
-if ! ollama list 2>/dev/null | grep -q 'qwen3.5:0.8b'; then
-  echo "警告: 未找到 ollama 模型 qwen3.5:0.8b"
+if ! ollama list 2>/dev/null | grep -q 'qwen3.5:0.8b-64k-demo'; then
+  echo "警告: 未找到 ollama 模型 qwen3.5:0.8b-64k-demo"
 fi
 
 if ! curl -sf "http://127.0.0.1:18800/.well-known/agent-card.json" >/dev/null 2>&1; then

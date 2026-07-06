@@ -3,20 +3,20 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>端云审计 Demo</title>
-  <link rel="stylesheet" href="/static/style.css" />
+  <title>本地 Agent vs 端云审计</title>
+  <link rel="stylesheet" href="/static/style.css?v=20260706-7" />
 </head>
 <body>
   <div class="chat-app">
     <header class="chat-header">
       <div class="chat-header__title">
-        <h1>端云审计 Demo</h1>
-        <p class="chat-header__sub">边侧 edge-worker · 对话式任务下发</p>
+        <h1>本地 Agent vs 端云审计</h1>
+        <p class="chat-header__sub">本地 Agent / 端云审计</p>
       </div>
       <div class="chat-header__meta">
         <div class="mode-switch" role="group" aria-label="运行模式">
-          <button type="button" class="mode-btn" data-mode="local_direct" id="modeLocal">本地直连</button>
-          <button type="button" class="mode-btn" data-mode="cloud_edge" id="modeCloud">端云规划+审计</button>
+          <button type="button" class="mode-btn" data-mode="local_direct" id="modeLocal">本地 Agent</button>
+          <button type="button" class="mode-btn" data-mode="cloud_edge" id="modeCloud">端云审计</button>
         </div>
       </div>
     </header>
@@ -24,13 +24,13 @@
     <main class="chat-thread" id="chatThread" aria-live="polite"></main>
 
     <footer class="chat-compose">
-      <section class="prompt-panel" id="promptPanel" aria-label="PinchBench 官方 Prompt">
+      <section class="prompt-panel" id="promptPanel" aria-label="官方任务 Prompt">
         <div class="prompt-panel__head">
-          <span class="prompt-panel__title">PinchBench 官方 Prompt</span>
+          <span class="prompt-panel__title">官方任务 Prompt</span>
           <div class="prompt-chips" id="promptChips"></div>
           <button type="button" class="prompt-use-btn" id="usePromptBtn">填入输入框</button>
         </div>
-        <pre class="prompt-official" id="officialPrompt">加载中…</pre>
+        <pre class="prompt-official" id="officialPrompt"></pre>
       </section>
       <div class="chat-compose__inner">
         <textarea
@@ -49,6 +49,6 @@
       <p class="chat-compose__hint">Enter 发送 · Shift+Enter 换行 · 运行中点击红色按钮终止</p>
     </footer>
   </div>
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=20260706-7"></script>
 </body>
 </html>

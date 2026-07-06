@@ -12,8 +12,8 @@ echo "=== 端云审计 Demo · 本地直连模式 ==="
 echo "DEMO_PROFILE=$DEMO_PROFILE"
 echo "URL: http://127.0.0.1:${DEMO_PORT}"
 
-if ! ollama list 2>/dev/null | grep -q 'qwen3.5:0.8b'; then
-  echo "警告: 未找到 ollama 模型 qwen3.5:0.8b，请先 ollama pull qwen3.5:0.8b"
+if ! ollama list 2>/dev/null | grep -q 'qwen3.5:0.8b-64k-demo'; then
+  echo "警告: 未找到 ollama 模型 qwen3.5:0.8b-64k-demo，请先创建新模型"
 fi
 
 if ! curl -sf "http://127.0.0.1:18800/.well-known/agent-card.json" >/dev/null 2>&1; then

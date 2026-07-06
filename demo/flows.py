@@ -16,10 +16,11 @@ from demo.pinchbench_rubric import rubric_payload
 from demo.pinchbench_scoring import GradeMode, PinchBenchGrade, grade_pinchbench_task
 from demo.run_registry import RunCancelled, check_cancelled, get, set_a2a_proc
 from demo.scoring import score_case
-from flow_env import build_llm, edge_worker_workspace, new_run_id
+from flow_env import build_llm, demo_run_workspace, new_run_id
 from openclaw_a2a_client import send_a2a_message
 from prompts import (
     build_audit_prompt,
+    build_local_direct_baseline_prompt,
     build_planning_prompt_for_m1c,
     build_rework_execution_prompt,
     enrich_prompt_with_plan,
@@ -71,7 +72,7 @@ class DemoRunner:
             max_reworks=max_reworks,
         )
         self.emitter = StageEmitter(self.state.run_id, on_stage)
-        self._workspace = edge_worker_workspace()
+        self._workspace = demo_run_workspace(self.state.run_id)
 
     @staticmethod
     def _parse_audit_report(crew_result: object) -> AuditReport:
@@ -102,9 +103,8 @@ class DemoRunner:
                 self.state.plan_text,
                 workspace_path=self._workspace,
             )
-        return enrich_prompt_with_plan(
+        return build_local_direct_baseline_prompt(
             self.state.user_request,
-            "",
             workspace_path=self._workspace,
         )
 
@@ -113,8 +113,8 @@ class DemoRunner:
             if self.state.mode == "cloud_edge":
                 return self._run_cloud_edge()
             self.emitter.skip("recall", message="Demo 模式不启用记忆召回")
-            self.emitter.skip("plan", message="本地直连：跳过云端规划")
-            self.emitter.skip("audit", message="本地直连：跳过 PinchBench LLM Judge")
+            self.emitter.skip("plan", message="本地 Agent：跳过云端规划")
+            self.emitter.skip("audit", message="本地 Agent：跳过云端审计")
             return self._run_local_direct()
         except RunCancelled:
             self._emit_cancelled()
@@ -182,6 +182,7 @@ class DemoRunner:
             grade = grade_pinchbench_task(
                 self.state.pinchbench_task_id,
                 execution_result=self.state.execution_result,
+                workspace_path=self._workspace,
                 mode=mode,
             )
         else:
@@ -266,12 +267,15 @@ class DemoRunner:
         llm = build_llm()
         planner = Agent(
             role="规划师",
-            goal="输出可供 edge-worker 执行的结构化计划",
+            goal="输出可供本地执行 Agent 执行的结构化计划",
             backstory="你熟悉 M1c 规划规范，只规划不执行。",
             llm=llm,
             verbose=False,
         )
-        prompt = build_planning_prompt_for_m1c(self.state.user_request)
+        prompt = build_planning_prompt_for_m1c(
+            self.state.user_request,
+            workspace_path=self._workspace,
+        )
         result = planner.kickoff(prompt)
         self._guard_cancel()
         self.state.plan_text = (result.raw or "").strip()
@@ -282,9 +286,10 @@ class DemoRunner:
         )
 
     def _run_execute(self, *, prompt: str) -> None:
+        prompt = self._normalize_execution_prompt(prompt)
         self.emitter.running(
             "execute",
-            message="A2A → edge-worker (qwen3.5:0.8b)…",
+            message="OpenClaw A2A → 本地执行 Agent…",
             payload={"prompt_preview": preview_text(prompt, 400)},
         )
         timeout_s = int(os.environ.get("DEMO_EXECUTE_TIMEOUT_S", "300"))
@@ -305,7 +310,7 @@ class DemoRunner:
             self.state.execution_result = result.text.strip()
             self.emitter.pass_(
                 "execute",
-                message="边侧执行完成",
+                message="本地 Agent 执行完成",
                 payload={"execution_preview": preview_text(self.state.execution_result)},
             )
         except RunCancelled:
@@ -322,6 +327,25 @@ class DemoRunner:
             raise
         finally:
             set_a2a_proc(run_id, None)
+
+    def _normalize_execution_prompt(self, prompt: str) -> str:
+        text = prompt or ""
+        text = re.sub(
+            r"(?<![\w./-])/workspace(?P<suffix>(?:/[^\s`\"')\]]+)?)",
+            lambda m: str(self._workspace) + m.group("suffix"),
+            text,
+        )
+        text = re.sub(
+            r"(?<![\w./-])/root/workspace(?P<suffix>(?:/[^\s`\"')\]]+)?)",
+            lambda m: str(self._workspace.parent.parent) + m.group("suffix"),
+            text,
+        )
+        text = re.sub(
+            r"~/.openclaw/workspace(?P<suffix>(?:/[^\s`\"')\]]+)?)",
+            lambda m: str(self._workspace.parent.parent) + m.group("suffix"),
+            text,
+        )
+        return text
 
     def _emit_cancelled(self) -> None:
         self.emitter.fail(
@@ -370,6 +394,5 @@ class DemoRunner:
                 "mode": self.state.mode,
                 "task_id": self.state.task_id,
                 "pinchbench_task_id": self.state.pinchbench_task_id,
-                "final_preview": preview_text(self.state.final_output, 1500),
             },
         )

@@ -3,7 +3,7 @@
 两台机器 live 对比演示：**本地直连**（任务直发 edge-worker + PinchBench 规则分）vs **端云规划+审计**（DeepSeek 规划 → 边侧执行 → main-audit + PinchBench 评分）。
 
 - 前端：自建对话页（`http://<host>:8765`），SSE 实时流水线
-- 执行：OpenClaw A2A `:18800` → `edge-worker` + Ollama `qwen3.5:0.8b`
+- 执行：OpenClaw A2A `:18800` → `edge-worker` + Ollama `qwen3.5:0.8b-64k-demo`
 - 评分：对齐 [pinchbench/skill](https://github.com/pinchbench/skill)
 
 ## 快速启动

@@ -35,6 +35,7 @@ body {
   background: var(--bg);
   color: var(--text);
   line-height: 1.55;
+  font-size: 18px;
 }
 
 .chat-app {
@@ -59,13 +60,13 @@ body {
 }
 
 .chat-header h1 {
-  font-size: 1.05rem;
+  font-size: 1.42rem;
   color: var(--text-strong);
   font-weight: 600;
 }
 
 .chat-header__sub {
-  font-size: 0.78rem;
+  font-size: 1rem;
   color: var(--muted);
   margin-top: 2px;
 }
@@ -82,7 +83,7 @@ body {
   border: none;
   background: transparent;
   color: var(--muted);
-  font-size: 0.78rem;
+  font-size: 0.98rem;
   font-weight: 600;
   padding: 6px 12px;
   border-radius: var(--radius-full);
@@ -135,7 +136,7 @@ body {
 }
 
 .chat-group.system .chat-bubble {
-  font-size: 0.8rem;
+  font-size: 0.9rem;
   color: var(--muted);
   background: var(--gray-bg);
   border-style: dashed;
@@ -150,7 +151,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.72rem;
+  font-size: 0.8rem;
   font-weight: 700;
   flex-shrink: 0;
   border: 1px solid var(--border);
@@ -175,7 +176,7 @@ body {
   flex-direction: column;
   gap: 8px;
   min-width: 0;
-  max-width: min(700px, 82%);
+  max-width: min(740px, 84%);
 }
 
 .chat-group.user .chat-group-messages {
@@ -183,11 +184,11 @@ body {
 }
 
 .chat-bubble {
-  padding: 10px 14px;
+  padding: 12px 16px;
   border-radius: var(--radius-lg);
   border: 1px solid var(--border);
   background: var(--card);
-  font-size: 0.92rem;
+  font-size: 1.08rem;
   white-space: pre-wrap;
   word-break: break-word;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
@@ -208,19 +209,48 @@ body {
   box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.08);
 }
 
+.mode-summary {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.mode-summary__eyebrow {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.mode-summary__title {
+  font-size: 1.16rem;
+  font-weight: 700;
+  color: var(--text-strong);
+}
+
+.mode-summary__body {
+  color: var(--text);
+}
+
+.mode-summary__foot {
+  display: none;
+}
+
 .pipeline-strip {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 10px;
+  gap: 10px;
+  margin-bottom: 14px;
 }
 
 .step {
-  padding: 4px 10px;
+  padding: 10px 18px;
   border-radius: var(--radius-full);
   border: 1px solid var(--border);
-  font-size: 0.72rem;
-  font-weight: 600;
+  font-size: 1rem;
+  font-weight: 700;
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
 }
 
 .step.pending { background: var(--gray-bg); color: var(--muted); }
@@ -230,9 +260,9 @@ body {
 .step.skipped { opacity: 0.55; text-decoration: line-through; }
 
 .stage-line {
-  font-size: 0.82rem;
+  font-size: 1.08rem;
   color: var(--muted);
-  margin: 4px 0;
+  margin: 4px 0 10px;
 }
 
 .stage-line strong {
@@ -241,23 +271,23 @@ body {
 }
 
 .stage-detail {
-  margin-top: 8px;
-  padding: 8px 10px;
+  margin-top: 10px;
+  padding: 14px 16px;
   border-radius: var(--radius-md);
   background: #f8fafc;
   border: 1px solid var(--border);
   font-family: ui-monospace, "Cascadia Code", monospace;
-  font-size: 0.75rem;
+  font-size: 1rem;
   color: #475569;
   white-space: pre-wrap;
   word-break: break-word;
-  max-height: 200px;
+  max-height: 280px;
   overflow: auto;
 }
 
 .score-inline {
-  margin-top: 10px;
-  padding: 10px 12px;
+  margin-top: 14px;
+  padding: 16px 18px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
 }
@@ -272,30 +302,47 @@ body {
   border-color: #fca5a5;
 }
 
-.score-inline__value {
-  font-size: 1.5rem;
-  font-weight: 800;
-  line-height: 1.2;
+.score-inline__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  line-height: 1.05;
 }
 
+.score-inline__state {
+  font-size: 1.24rem;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.score-inline__value {
+  font-size: 2.25rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.score-inline.pass .score-inline__state,
 .score-inline.pass .score-inline__value { color: var(--ok); }
+.score-inline.fail .score-inline__state,
 .score-inline.fail .score-inline__value { color: var(--destructive); }
 
 .score-inline__label {
-  font-size: 0.85rem;
-  font-weight: 600;
-  margin-top: 2px;
+  font-size: 1.06rem;
+  font-weight: 700;
+  color: var(--text-strong);
+  line-height: 1;
 }
 
 .issue-list {
   margin-top: 8px;
   padding-left: 1.1rem;
-  font-size: 0.8rem;
+  font-size: 0.9rem;
   color: var(--muted);
 }
 
 .rubric-panel {
-  margin: 10px 0;
+  margin: 12px 0;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: #f8fafc;
@@ -304,8 +351,8 @@ body {
 
 .rubric-panel summary {
   cursor: pointer;
-  padding: 8px 12px;
-  font-size: 0.82rem;
+  padding: 10px 14px;
+  font-size: 1rem;
   font-weight: 600;
   color: var(--text-strong);
   background: var(--gray-bg);
@@ -317,19 +364,18 @@ body {
 }
 
 .rubric-panel__body {
-  padding: 10px 12px 12px;
-  font-size: 0.8rem;
+  padding: 12px 14px 14px;
+  font-size: 1rem;
 }
 
-.rubric-meta,
-.rubric-active {
+.rubric-meta {
   color: var(--muted);
   margin-bottom: 8px;
   line-height: 1.45;
 }
 
 .rubric-section-title {
-  font-size: 0.78rem;
+  font-size: 1rem;
   font-weight: 700;
   color: var(--text-strong);
   margin: 10px 0 6px;
@@ -344,11 +390,17 @@ body {
   margin-bottom: 4px;
 }
 
+.rubric-mode-note {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
 .rubric-text {
   white-space: pre-wrap;
   word-break: break-word;
   font-family: ui-monospace, "Cascadia Code", monospace;
-  font-size: 0.72rem;
+  font-size: 0.92rem;
   color: #475569;
   background: #fff;
   border: 1px solid var(--border);
@@ -401,10 +453,16 @@ body {
 }
 
 .prompt-panel__title {
-  font-size: 0.78rem;
+  font-size: 0.96rem;
   font-weight: 700;
   color: var(--text-strong);
   white-space: nowrap;
+}
+
+.prompt-panel__note {
+  padding: 8px 12px 0;
+  font-size: 0.96rem;
+  color: var(--muted);
 }
 
 .prompt-chips {
@@ -418,7 +476,7 @@ body {
   border: 1px solid var(--border);
   background: var(--card);
   color: var(--muted);
-  font-size: 0.72rem;
+  font-size: 0.92rem;
   font-weight: 600;
   padding: 4px 10px;
   border-radius: var(--radius-full);
@@ -440,7 +498,7 @@ body {
   border: 1px solid var(--border);
   background: var(--card);
   color: var(--text-strong);
-  font-size: 0.72rem;
+  font-size: 0.92rem;
   font-weight: 600;
   padding: 4px 10px;
   border-radius: var(--radius-sm);
@@ -462,7 +520,7 @@ body {
   margin: 0;
   padding: 10px 12px;
   font-family: ui-monospace, "Cascadia Code", monospace;
-  font-size: 0.75rem;
+  font-size: 0.98rem;
   line-height: 1.45;
   color: #334155;
   white-space: pre-wrap;
@@ -489,7 +547,7 @@ body {
   background: transparent;
   color: var(--text);
   font: inherit;
-  font-size: 0.92rem;
+  font-size: 1.08rem;
   line-height: 1.45;
   max-height: 160px;
   min-height: 24px;
@@ -526,13 +584,13 @@ body {
 
 .chat-send-btn.is-cancel::after {
   content: "■";
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1;
 }
 
 .chat-compose__hint {
   margin-top: 6px;
-  font-size: 0.72rem;
+  font-size: 0.92rem;
   color: var(--muted);
   text-align: center;
 }
@@ -557,4 +615,11 @@ body {
   .mode-btn { flex: 1; }
   .chat-thread { padding: 12px 10px 6px; }
   .chat-group-messages { max-width: 90%; }
+  body { font-size: 17px; }
+  .chat-bubble { padding: 12px 14px; }
+  .step { padding: 9px 14px; min-height: 38px; font-size: 0.96rem; }
+  .stage-detail { max-height: 260px; }
+  .score-inline__value { font-size: 2rem; }
+  .score-inline__state { font-size: 1.08rem; }
+  .score-inline__label { font-size: 0.98rem; }
 }
