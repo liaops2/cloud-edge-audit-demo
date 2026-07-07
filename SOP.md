@@ -143,14 +143,19 @@ bash scripts/start-demo-cloud.sh
 
 页面底部 **「PinchBench 官方 Prompt」** 面板：
 
-1. 点击 **File Structure Creation**（`task_files`）
+1. 点击 **Cron Expression Generator**（`task_cron_organizer`，推荐对比任务）
 2. 确认展示官方英文 Prompt
 3. 点击 **「填入输入框」**（两台各操作一次）
 
-官方 Prompt：
+> 选题依据：`task_files` 过于简单，本地直连也能 1.0，演示不出端云价值。cron 这道题**本地 0.8b 会崩、端云能精确完成**（实测本地 0.1 / 端云 0.9），且为纯自动评分、无网络依赖、可复现。其它同类可选：`task_files`（保底 smoke）。
+
+官方 Prompt（节选，完整见底部面板/`demo/tasks.yaml`）：
 
 ```text
-Create a project structure with: src/ directory, src/main.py with hello world, README.md with project title, and .gitignore ignoring __pycache__.
+Convert the following natural language schedule descriptions into properly formatted cron expressions.
+Save the results to `cron_expressions.json` as a JSON array (description / cron / explanation).
+（10 条排班：weekday 9AM、每 15 分钟、每月 1 号 0 点、周日 15:30、每 6 小时、
+ Mon-Fri 17:00、每天 8AM/8PM、工作日 9-17 点每刻钟、每月最后工作日 18:00、周六 2-4AM 每 5 分钟）
 ```
 
 ### 5.3 机器 A 运行（3–5 min）
