@@ -12,9 +12,11 @@ from crewai import Agent, Crew, Process, Task
 from pydantic import ValidationError
 
 from demo.crewpi_adapter import (
+    CrewPiFreeformResult,
     crewpi_enabled,
     crewpi_mode_for_demo,
     crewpi_payload,
+    run_crewpi_freeform_task,
     run_crewpi_pinchbench_task,
 )
 from demo.events import StageCallback, StageEmitter, preview_text
@@ -132,10 +134,11 @@ class DemoRunner:
         check_cancelled(self.state.run_id)
 
     def _run_crewpi_backend(self) -> DemoRunState:
-        if not self.state.pinchbench_task_id:
-            raise RuntimeError("CrewPi backend requires a PinchBench task id.")
-
         crewpi_mode = crewpi_mode_for_demo(self.state.mode)
+        if not self.state.pinchbench_task_id:
+            # Free-form user question: no PinchBench rubric, surface audit verdict.
+            return self._run_crewpi_freeform(crewpi_mode)
+
         self.emitter.skip("recall", message="CrewPi memory 默认关闭")
         if crewpi_mode == "pi_only":
             self.emitter.skip("plan", message="CrewPi Pi-only：跳过云端规划")
@@ -195,6 +198,90 @@ class DemoRunner:
             )
         self._emit_score(result.grade)
         return self.state
+
+    def _run_crewpi_freeform(self, crewpi_mode: str) -> DemoRunState:
+        self.emitter.skip("recall", message="CrewPi memory 默认关闭")
+        if crewpi_mode == "pi_only":
+            self.emitter.skip("plan", message="CrewPi Pi-only：跳过云端规划")
+            self.emitter.skip("audit", message="CrewPi Pi-only：跳过云端审计")
+        else:
+            self.emitter.running("plan", message="CrewPi 云端规划中…")
+            self.emitter.running("audit", message="CrewPi 云端审计待执行…")
+
+        self._guard_cancel()
+        self.emitter.running(
+            "execute",
+            message=(
+                "CrewPi Pi-only → 本地 Pi Agent…"
+                if crewpi_mode == "pi_only"
+                else "CrewPi 规划/执行/审计 → 本地 Pi Agent…"
+            ),
+            payload={"prompt_preview": preview_text(self.state.user_request, 400)},
+        )
+        result = run_crewpi_freeform_task(
+            goal=self.state.user_request,
+            mode=crewpi_mode,
+            run_id=self.state.run_id,
+        )
+        self._guard_cancel()
+        self.state.execution_result = result.execution_result
+        execution_ok = result.status == "done"
+
+        if crewpi_mode == "crewpi":
+            self.emitter.pass_("plan", message="CrewPi 规划完成")
+            audit_payload = {
+                "pass": bool(result.audit_pass),
+                "confidence": result.audit_confidence,
+                "summary": f"CrewPi 审计 status={result.audit_status}",
+                "issues": result.audit_findings,
+            }
+            if result.audit_pass:
+                self.emitter.pass_("audit", message="CrewPi 审计通过", payload=audit_payload)
+            else:
+                self.emitter.fail("audit", message="CrewPi 审计未通过", payload=audit_payload)
+
+        exec_payload = {"execution_preview": preview_text(result.execution_result, 1200)}
+        if execution_ok:
+            self.emitter.pass_("execute", message="CrewPi 执行完成", payload=exec_payload)
+        else:
+            self.emitter.fail("execute", message=f"CrewPi 执行未完成: {result.status}", payload=exec_payload)
+
+        self._emit_audit_score(crewpi_mode, result)
+        return self.state
+
+    def _emit_audit_score(self, crewpi_mode: str, result: CrewPiFreeformResult) -> None:
+        if crewpi_mode == "pi_only":
+            # Local direct has no audit gate; a free-form question has no PinchBench rubric.
+            self.emitter.skip("score", message="本地直连无审计门禁 · 自由问题无 PinchBench 评分")
+            self.emitter.pass_(
+                "done",
+                message="运行结束",
+                payload={"mode": self.state.mode, "task_id": self.state.task_id},
+            )
+            return
+
+        passed = bool(result.audit_pass)
+        confidence = result.audit_confidence
+        payload = {
+            # Audit is a binary gate; headline reflects pass/fail, not a rubric %.
+            "score": 10 if passed else 0,
+            "pass": passed,
+            "pinchbench_type": "审计门禁",
+            "issues": result.audit_findings,
+        }
+        conf_note = ""
+        if confidence is not None and abs(confidence - 0.5) > 1e-9:
+            conf_note = f"（置信度 {confidence * 100:.0f}%）"
+        msg = f"{'通过' if passed else '未通过'} · 审计门禁{conf_note}"
+        if passed:
+            self.emitter.pass_("score", message=msg, payload=payload)
+        else:
+            self.emitter.fail("score", message=msg, payload=payload)
+        self.emitter.pass_(
+            "done",
+            message="运行结束",
+            payload={"mode": self.state.mode, "task_id": self.state.task_id},
+        )
 
     def _run_local_direct(self) -> DemoRunState:
         self._guard_cancel()

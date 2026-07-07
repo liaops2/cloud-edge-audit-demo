@@ -46,39 +46,15 @@ def run_crewpi_pinchbench_task(
     from crewpi.pinchbench.runner import (  # type: ignore
         build_default_audit_judge_client,
         build_default_planner_client,
-        build_runner,
         run_task,
     )
     import crewpi.pinchbench.runner as crewpi_runner  # type: ignore
 
-    crewpi_home = crewpi_home_path()
-    data_root = Path(os.environ.get("DEMO_CREWPI_DATA_DIR", ".demo-crewpi")).expanduser().resolve()
     pinchbench_dir = Path(
         os.environ.get("PINCHBENCH_SKILL_DIR")
         or os.environ.get("PINCHBENCH_DIR", "/home/admin/skill")
     ).expanduser()
-    runner_kind = os.environ.get("DEMO_CREWPI_RUNNER", "source-built-pi").strip()
-    source_built_pi = runner_kind in {"source-built-pi", "source_built_pi", "source"}
-    dry_run = runner_kind in {"dry-run", "dry_run"}
-    if source_built_pi:
-        os.environ.setdefault("PI_OFFLINE", "1")
-    pi_entrypoint = Path(
-        os.environ.get(
-            "CREWPI_PI_ENTRYPOINT",
-            str(crewpi_home / "vendor/pi/packages/coding-agent/dist/cli.js"),
-        )
-    ).expanduser()
-    agent_model = _agent_model_for_mode(mode)
-
-    runner = build_runner(
-        dry_run=dry_run,
-        source_built_pi=source_built_pi,
-        agent=agent_model,
-        pi_entrypoint=pi_entrypoint,
-    )
-    if source_built_pi and hasattr(runner, "timeout_seconds"):
-        runner.timeout_seconds = _pi_timeout_for_mode(mode)
-    runner = _CanonicalToolRunner(runner)
+    runner, data_root = _build_demo_runner(mode)
 
     planner_client = build_default_planner_client() if mode == "crewpi" else None
     audit_judge_client = build_default_audit_judge_client() if mode == "crewpi" else None
@@ -116,6 +92,159 @@ def run_crewpi_pinchbench_task(
         execution_result=execution_result,
         grade=grade,
         raw=raw,
+    )
+
+
+def _build_demo_runner(mode: CrewPiMode) -> tuple[Any, Path]:
+    """Build the demo Pi runner and resolve the CrewPi data root for the mode."""
+    from crewpi.pinchbench.runner import build_runner  # type: ignore
+
+    crewpi_home = crewpi_home_path()
+    data_root = Path(os.environ.get("DEMO_CREWPI_DATA_DIR", ".demo-crewpi")).expanduser().resolve()
+    runner_kind = os.environ.get("DEMO_CREWPI_RUNNER", "source-built-pi").strip()
+    source_built_pi = runner_kind in {"source-built-pi", "source_built_pi", "source"}
+    dry_run = runner_kind in {"dry-run", "dry_run"}
+    if source_built_pi:
+        os.environ.setdefault("PI_OFFLINE", "1")
+    pi_entrypoint = Path(
+        os.environ.get(
+            "CREWPI_PI_ENTRYPOINT",
+            str(crewpi_home / "vendor/pi/packages/coding-agent/dist/cli.js"),
+        )
+    ).expanduser()
+    runner = build_runner(
+        dry_run=dry_run,
+        source_built_pi=source_built_pi,
+        agent=_agent_model_for_mode(mode),
+        pi_entrypoint=pi_entrypoint,
+    )
+    if source_built_pi and hasattr(runner, "timeout_seconds"):
+        runner.timeout_seconds = _pi_timeout_for_mode(mode)
+    return _CanonicalToolRunner(runner), data_root
+
+
+_FREEFORM_PLANNER_SYSTEM_PROMPT = (
+    "You are the CrewPi cloud planner. Produce a bounded execution plan as JSON for a free-form user "
+    "request. Do not include prose outside the JSON object. Choose as many steps as the request needs. "
+    "When a step runs a shell command, the command must only DO the work and must exit 0 when it "
+    "succeeds; do not append verification that asserts specific predicted output values. "
+    "Every step must be executable by the edge executor and use only allowed tool names. "
+    "File operations run with the workspace as the current working directory; use relative paths."
+)
+
+
+@dataclass(slots=True)
+class CrewPiFreeformResult:
+    run_id: str
+    mode: CrewPiMode
+    status: str
+    audit_pass: bool | None
+    audit_status: str | None
+    audit_confidence: float | None
+    audit_findings: list[str]
+    execution_result: str
+    workspace: Path
+    trace_path: Path
+
+
+def run_crewpi_freeform_task(
+    *,
+    goal: str,
+    mode: CrewPiMode,
+    run_id: str,
+) -> CrewPiFreeformResult:
+    """Run a free-form (non-PinchBench) request through CrewPi.
+
+    There is no PinchBench rubric for a user-typed question, so instead of a
+    PinchBench grade this returns the independent cloud audit verdict.
+    """
+    _prepare_crewpi_imports()
+    _load_crewpi_env()
+
+    import asyncio
+
+    from crewpi.agent_collab.llm_auditor import LLMAuditor  # type: ignore
+    from crewpi.agent_collab.llm_planner import LLMPlanner  # type: ignore
+    from crewpi.agent_collab.orchestrator import AgentCollabOrchestrator  # type: ignore
+    from crewpi.agent_collab.schemas import RiskLevel, RunStatus, Step  # type: ignore
+    from crewpi.agent_collab.trace_uploader import JsonlTraceUploader  # type: ignore
+    from crewpi.memory.interfaces import NullMemoryProvider  # type: ignore
+    from crewpi.pinchbench.runner import (  # type: ignore
+        build_default_audit_judge_client,
+        build_default_planner_client,
+    )
+
+    runner, data_root = _build_demo_runner(mode)
+    workspace = data_root / "workspaces" / run_id / "chat"
+    workspace.mkdir(parents=True, exist_ok=True)
+    trace_dir = data_root / "traces"
+    trace_uploader = JsonlTraceUploader(trace_dir)
+    retries = int(os.environ.get("DEMO_CREWPI_VALIDATION_RETRIES", "5"))
+
+    audit_pass: bool | None = None
+    audit_status: str | None = None
+    audit_confidence: float | None = None
+    audit_findings: list[str] = []
+
+    if mode == "crewpi":
+        planner = LLMPlanner(
+            client=build_default_planner_client(),
+            max_validation_retries=retries,
+            trace_uploader=trace_uploader,
+            system_prompt=_FREEFORM_PLANNER_SYSTEM_PROMPT,
+        )
+        auditor = LLMAuditor(
+            client=build_default_audit_judge_client(),
+            max_validation_retries=retries,
+            trace_uploader=trace_uploader,
+        )
+        orchestrator = AgentCollabOrchestrator(
+            planner=planner,
+            pi_runner=runner,
+            auditor=auditor,
+            trace_uploader=trace_uploader,
+            memory_provider=NullMemoryProvider(),
+        )
+        result = asyncio.run(
+            orchestrator.run(goal=goal, workspace_dir=str(workspace), run_id=run_id)
+        )
+        status = str(result.status)
+        audit_pass = result.status == RunStatus.DONE
+        last_audit = result.audits[-1] if result.audits else None
+        if last_audit is not None:
+            audit_status = str(last_audit.status)
+            confidence = last_audit.metadata.get("confidence")
+            audit_confidence = float(confidence) if confidence is not None else None
+            audit_findings = [str(item) for item in last_audit.findings]
+        execution_result = result.executions[-1].output if result.executions else ""
+    else:
+        step = Step(
+            step_id="chat",
+            goal=(goal[:60].strip() or "chat"),
+            instructions=goal,
+            risk=RiskLevel.LOW,
+            allowed_tools=["read", "exec", "apply_patch"],
+            acceptance=[],
+            metadata={"mode": "pi_only"},
+        )
+        execution = asyncio.run(
+            runner.run_step(run_id=run_id, step=step, workspace_dir=str(workspace))
+        )
+        trace_uploader.append_execution(execution)
+        status = "done" if execution.ok else "failed"
+        execution_result = execution.output or (execution.error or "")
+
+    return CrewPiFreeformResult(
+        run_id=run_id,
+        mode=mode,
+        status=status,
+        audit_pass=audit_pass,
+        audit_status=audit_status,
+        audit_confidence=audit_confidence,
+        audit_findings=audit_findings,
+        execution_result=execution_result,
+        workspace=workspace,
+        trace_path=trace_dir / f"{run_id}.jsonl",
     )
 
 
