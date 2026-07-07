@@ -98,6 +98,20 @@ export DEMO_PORT=8765                      # 可选，默认 8765
 export DEMO_HOST=0.0.0.0                   # 投屏时允许局域网访问
 ```
 
+如需使用 CrewPi runtime 作为后端：
+
+```bash
+export DEMO_BACKEND=crewpi
+export CREWPI_HOME=$HOME/crewpi
+export CREWPI_ENV_FILE=$CREWPI_HOME/.env
+export DEMO_CREWPI_LOCAL_AGENT=ollama/qwen3.5:0.8b-64k-demo
+export DEMO_CREWPI_CLOUD_AGENT=ollama/qwen3.5:0.8b-64k-demo
+export DEMO_CREWPI_LOCAL_TIMEOUT_S=15
+export DEMO_CREWPI_CLOUD_TIMEOUT_S=180
+```
+
+此模式下 UI 保持不变；本地直连映射为 CrewPi `pi_only`，端云审计映射为 CrewPi `crewpi`（LLM planner + LLM auditor + Pi 执行）。
+
 ### 4.3 启动
 
 **机器 A（本地直连）**

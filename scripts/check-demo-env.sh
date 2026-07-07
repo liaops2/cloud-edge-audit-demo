@@ -113,10 +113,14 @@ check_common() {
   fi
 
   section "通用 · OpenClaw A2A"
-  if curl -sf "http://127.0.0.1:18800/.well-known/agent-card.json" >/dev/null 2>&1; then
-    pass "A2A Gateway :18800 可达"
+  if [[ "${DEMO_BACKEND:-}" == "crewpi" ]]; then
+    warn "DEMO_BACKEND=crewpi：跳过 A2A :18800 必需性检查"
   else
-    fail "A2A Gateway :18800 不可达（请启动 openclaw gateway + a2a-gateway）"
+    if curl -sf "http://127.0.0.1:18800/.well-known/agent-card.json" >/dev/null 2>&1; then
+      pass "A2A Gateway :18800 可达"
+    else
+      fail "A2A Gateway :18800 不可达（请启动 openclaw gateway + a2a-gateway）"
+    fi
   fi
 
   if command -v openclaw >/dev/null 2>&1; then
@@ -136,6 +140,24 @@ check_common() {
     warn "未找到 $a2a_send（执行阶段可能失败）"
   fi
 
+  section "通用 · CrewPi 后端（可选）"
+  local crewpi_home="${CREWPI_HOME:-$HOME/crewpi}"
+  if [[ -d "$crewpi_home/crewpi" ]]; then
+    pass "CREWPI_HOME=$crewpi_home"
+  else
+    warn "CrewPi 仓库不存在: $crewpi_home"
+  fi
+  if [[ -f "${CREWPI_PI_ENTRYPOINT:-$crewpi_home/vendor/pi/packages/coding-agent/dist/cli.js}" ]]; then
+    pass "CrewPi source-built Pi entrypoint 可用"
+  else
+    warn "CrewPi source-built Pi entrypoint 不存在（DEMO_BACKEND=crewpi 时可能失败）"
+  fi
+  if [[ "${DEMO_BACKEND:-}" == "crewpi" ]]; then
+    PYTHONPATH="$crewpi_home:${PYTHONPATH:-}" uv run python - <<'PY' >/dev/null 2>&1 && pass "CrewPi Python import OK" || fail "CrewPi Python import 失败"
+import crewpi
+PY
+  fi
+
   section "通用 · Demo 端口"
   local port="${DEMO_PORT:-8765}"
   if curl -sf "http://127.0.0.1:${port}/api/config" >/dev/null 2>&1; then
@@ -149,7 +171,12 @@ check_common() {
 
 check_cloud() {
   section "机器 B · 云端 LLM（SiliconFlow / DeepSeek）"
-  local env_file="${OPENCLAW_ENV_FILE:-$HOME/openclaw-hermes-cloud-edge/.env}"
+  local env_file
+  if [[ "${DEMO_BACKEND:-}" == "crewpi" ]]; then
+    env_file="${CREWPI_ENV_FILE:-${CREWPI_HOME:-$HOME/crewpi}/.env}"
+  else
+    env_file="${OPENCLAW_ENV_FILE:-$HOME/openclaw-hermes-cloud-edge/.env}"
+  fi
   if [[ -f "$env_file" ]]; then
     pass "环境文件存在: $env_file"
     # shellcheck disable=SC1090
@@ -158,10 +185,12 @@ check_cloud() {
     fail "未找到环境文件: $env_file（可设置 OPENCLAW_ENV_FILE）"
   fi
 
-  if [[ -n "${SILICONFLOW_API_KEY:-}" ]]; then
+  if [[ "${DEMO_BACKEND:-}" == "crewpi" && -n "${PLANNER_API_KEY:-}" ]]; then
+    pass "PLANNER_API_KEY 已设置"
+  elif [[ -n "${SILICONFLOW_API_KEY:-}" ]]; then
     pass "SILICONFLOW_API_KEY 已设置"
   else
-    fail "未设置 SILICONFLOW_API_KEY"
+    fail "未设置 SILICONFLOW_API_KEY${DEMO_BACKEND:+ 或 PLANNER_API_KEY}"
   fi
 
   if [[ -n "${SILICONFLOW_BASE_URL:-}" ]]; then
@@ -170,7 +199,14 @@ check_cloud() {
     warn "未设置 SILICONFLOW_BASE_URL（将依赖代码默认值）"
   fi
 
-  if [[ -n "${DEEPSEEK_MODEL:-}" ]]; then
+  if [[ "${DEMO_BACKEND:-}" == "crewpi" && -n "${PLANNER_MODEL:-}" ]]; then
+    pass "PLANNER_MODEL=${PLANNER_MODEL}"
+    if [[ -n "${AUDIT_JUDGE_MODEL:-}" ]]; then
+      pass "AUDIT_JUDGE_MODEL=${AUDIT_JUDGE_MODEL}"
+    else
+      warn "未设置 AUDIT_JUDGE_MODEL（将使用 CrewPi 默认审计模型）"
+    fi
+  elif [[ -n "${DEEPSEEK_MODEL:-}" ]]; then
     pass "DEEPSEEK_MODEL=${DEEPSEEK_MODEL}"
   else
     warn "未设置 DEEPSEEK_MODEL（将使用 deepseek-ai/DeepSeek-V4-Flash）"

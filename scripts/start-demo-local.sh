@@ -6,10 +6,19 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 export DEMO_PROFILE="${DEMO_PROFILE:-local_direct}"
 export DEMO_PORT="${DEMO_PORT:-8765}"
 export DEMO_HOST="${DEMO_HOST:-0.0.0.0}"
+export CREWPI_HOME="${CREWPI_HOME:-$HOME/crewpi}"
 export PYTHONPATH="${ROOT}${PYTHONPATH:+:$PYTHONPATH}"
+if [[ -d "$CREWPI_HOME/crewpi" ]]; then
+  export PYTHONPATH="${CREWPI_HOME}:$PYTHONPATH"
+fi
 
 echo "=== 端云审计 Demo · 本地直连模式 ==="
 echo "DEMO_PROFILE=$DEMO_PROFILE"
+echo "DEMO_BACKEND=${DEMO_BACKEND:-a2a}"
+if [[ "${DEMO_BACKEND:-}" == "crewpi" ]]; then
+  echo "DEMO_CREWPI_LOCAL_AGENT=${DEMO_CREWPI_LOCAL_AGENT:-ollama/qwen3.5:0.8b-64k-demo}"
+  echo "DEMO_CREWPI_LOCAL_TIMEOUT_S=${DEMO_CREWPI_LOCAL_TIMEOUT_S:-15}"
+fi
 echo "URL: http://127.0.0.1:${DEMO_PORT}"
 
 if ! ollama list 2>/dev/null | grep -q 'qwen3.5:0.8b-64k-demo'; then

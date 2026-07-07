@@ -2,6 +2,7 @@ __pycache__/
 *.py[cod]
 .venv/
 .env
+.demo-crewpi/
 *.log
 .DS_Store
 .idea/

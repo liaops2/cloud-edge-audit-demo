@@ -11,6 +11,12 @@ from typing import Any, Literal
 from crewai import Agent, Crew, Process, Task
 from pydantic import ValidationError
 
+from demo.crewpi_adapter import (
+    crewpi_enabled,
+    crewpi_mode_for_demo,
+    crewpi_payload,
+    run_crewpi_pinchbench_task,
+)
 from demo.events import StageCallback, StageEmitter, preview_text
 from demo.pinchbench_rubric import rubric_payload
 from demo.pinchbench_scoring import GradeMode, PinchBenchGrade, grade_pinchbench_task
@@ -110,6 +116,8 @@ class DemoRunner:
 
     def kickoff(self) -> DemoRunState:
         try:
+            if crewpi_enabled():
+                return self._run_crewpi_backend()
             if self.state.mode == "cloud_edge":
                 return self._run_cloud_edge()
             self.emitter.skip("recall", message="Demo 模式不启用记忆召回")
@@ -122,6 +130,71 @@ class DemoRunner:
 
     def _guard_cancel(self) -> None:
         check_cancelled(self.state.run_id)
+
+    def _run_crewpi_backend(self) -> DemoRunState:
+        if not self.state.pinchbench_task_id:
+            raise RuntimeError("CrewPi backend requires a PinchBench task id.")
+
+        crewpi_mode = crewpi_mode_for_demo(self.state.mode)
+        self.emitter.skip("recall", message="CrewPi memory 默认关闭")
+        if crewpi_mode == "pi_only":
+            self.emitter.skip("plan", message="CrewPi Pi-only：跳过云端规划")
+            self.emitter.skip("audit", message="CrewPi Pi-only：跳过云端审计")
+        else:
+            self.emitter.running("plan", message="CrewPi 云端规划中…")
+            self.emitter.running("audit", message="CrewPi 云端审计待执行…")
+
+        self._guard_cancel()
+        self.emitter.running(
+            "execute",
+            message=(
+                "CrewPi Pi-only → 本地 Pi Agent…"
+                if crewpi_mode == "pi_only"
+                else "CrewPi 规划/执行/审计 → 本地 Pi Agent…"
+            ),
+            payload={"prompt_preview": preview_text(self.state.user_request, 400)},
+        )
+        result = run_crewpi_pinchbench_task(
+            task_id=self.state.pinchbench_task_id,
+            mode=crewpi_mode,
+            run_id=self.state.run_id,
+        )
+        self._guard_cancel()
+        self.state.execution_result = result.execution_result
+        self.state.grade = result.grade
+        if crewpi_mode == "crewpi":
+            self.emitter.pass_("plan", message="CrewPi 规划完成")
+            audit_status = "pass" if result.status == "done" else "fail"
+            audit_payload = {
+                "pass": result.status == "done",
+                "score": 10 if result.status == "done" else 0,
+                "summary": f"CrewPi status={result.status}",
+                "issues": result.grade.issues,
+            }
+            if audit_status == "pass":
+                self.emitter.pass_("audit", message="CrewPi 审计通过", payload=audit_payload)
+            else:
+                self.emitter.fail("audit", message=f"CrewPi 审计未通过: {result.status}", payload=audit_payload)
+
+        execute_payload = crewpi_payload(result)
+        execution_passed = result.status == "done" and result.grade.combined_pass
+        if execution_passed:
+            self.emitter.pass_(
+                "execute",
+                message="CrewPi 执行完成",
+                payload=execute_payload,
+            )
+        else:
+            self.emitter.fail(
+                "execute",
+                message=f"CrewPi 执行未达标: {result.status}",
+                payload={
+                    **execute_payload,
+                    "issues": result.grade.issues,
+                },
+            )
+        self._emit_score(result.grade)
+        return self.state
 
     def _run_local_direct(self) -> DemoRunState:
         self._guard_cancel()

@@ -20,10 +20,26 @@ bash scripts/start-demo-local.sh
 # 机器 B（需 SiliconFlow）
 bash scripts/start-demo-cloud.sh
 
+# 可选：使用 CrewPi runtime 作为执行后端
+export DEMO_BACKEND=crewpi
+export CREWPI_HOME=$HOME/crewpi
+bash scripts/start-demo-cloud.sh
+
 # 演示前环境检查（两台通用）
 bash scripts/check-demo-env.sh
 bash scripts/check-demo-env.sh --profile cloud   # 仅机器 B
 ```
+
+`DEMO_BACKEND=crewpi` 时，UI 不变；后端改为调用 CrewPi：
+
+- 本地 Agent：CrewPi `pi_only`
+- 端云审计：CrewPi `crewpi` + LLM planner/auditor
+- PinchBench 任务源：`PINCHBENCH_SKILL_DIR`，默认 `$HOME/skill`
+- CrewPi 配置：`CREWPI_ENV_FILE`，默认 `$CREWPI_HOME/.env`
+- 本地执行模型：`DEMO_CREWPI_LOCAL_AGENT` 默认 `ollama/qwen3.5:0.8b-64k-demo`
+- 端云执行模型：`DEMO_CREWPI_CLOUD_AGENT` 默认 `ollama/qwen3.5:0.8b-64k-demo`
+- 本地 Pi 超时：`DEMO_CREWPI_LOCAL_TIMEOUT_S` 默认 `15`，用于展示小模型直连受限
+- 端云 Pi 超时：`DEMO_CREWPI_CLOUD_TIMEOUT_S` 默认 `180`
 
 详细步骤见 [SOP.md](./SOP.md)。  
 **现场讲解分镜稿**见 [DEMO_SCRIPT.md](./DEMO_SCRIPT.md)（PPT + 双机 Demo 口播脚本）。
@@ -32,6 +48,7 @@ bash scripts/check-demo-env.sh --profile cloud   # 仅机器 B
 
 ```
 ├── demo/              # FastAPI + SSE + 前端
+│   ├── crewpi_adapter.py
 ├── scripts/           # 启动脚本
 ├── flow_env.py        # LLM / A2A 环境
 ├── prompts.py         # M1c 规划 + main-audit 提示词
