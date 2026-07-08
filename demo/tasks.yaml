@@ -59,19 +59,20 @@ tasks:
     request: |
       Say "Hello, I'm ready!" to confirm you can respond.
 
-  # --- coding 类对比题(segmented 实测可用)---
-  - id: task_iterative_code_refine
-    source: pinchbench
-    pinchbench_task_id: task_iterative_code_refine
-    name: Iterative Code Refine
-    description: PinchBench · 多步代码迭代 · 审计 findings 展示最佳(隐私边界卖点)
-    request: |
-      Iteratively refine the code per the task spec (loaded from PinchBench).
-
+  # --- coding 类强对比题(pi_only 0.0 → crewpi 1.0)---
   - id: task_dockerfile_optimization
     source: pinchbench
     pinchbench_task_id: task_dockerfile_optimization
     name: Dockerfile Optimization
-    description: PinchBench · Dockerfile 优化 · 备选 coding 题(~88s 偏慢)
+    description: PinchBench · Dockerfile 优化 · 强对比(pi_only 0.0 → crewpi 1.0，~88s)
     request: |
       Optimize the Dockerfile per the task spec (loaded from PinchBench).
+
+  # 备选：对比强但 flaky（crewpi 3 次中约 1 次失败），现场需预热挑一次
+  - id: task_git_rescue_recovery
+    source: pinchbench
+    pinchbench_task_id: task_git_rescue_recovery
+    name: Git Rescue Recovery
+    description: PinchBench · git 状态恢复 · 强对比但 flaky（pi_only 0.14 → crewpi 1.0）
+    request: |
+      Recover the git repository state per the task spec (loaded from PinchBench).
