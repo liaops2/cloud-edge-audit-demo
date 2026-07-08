@@ -14,7 +14,7 @@ let selectedMode = "local_direct";
 let activeRunId = null;
 let activeEs = null;
 let pinchbenchTasks = [];
-let selectedPromptTaskId = "task_files";
+let selectedPromptTaskId = "task_cron_organizer";
 let welcomeBubbleEl = null;
 let modeSummaryEl = null;
 
@@ -114,11 +114,7 @@ function formatStageDetail(event) {
   if (payload.plan_preview) parts.push(`【计划】\n${payload.plan_preview}`);
   if (payload.prompt_preview) parts.push(`【下发】\n${payload.prompt_preview}`);
   if (payload.execution_preview) parts.push(`【执行】\n${payload.execution_preview}`);
-  if (payload.rework_hints) parts.push(`【返工提示】\n${payload.rework_hints}`);
   if (payload.issues?.length) parts.push(`【问题】\n${payload.issues.join("\n")}`);
-  if (!parts.length && Object.keys(payload).length) {
-    parts.push(JSON.stringify(payload, null, 2));
-  }
   return parts.join("\n\n");
 }
 
@@ -284,7 +280,6 @@ function setSelectedMode(mode) {
   $("modeCloud").classList.toggle("active", mode === "cloud_edge");
   renderModeSummary();
   renderPromptPanel();
-  if (welcomeBubbleEl) loadDefaultRubric(welcomeBubbleEl);
 }
 
 function welcomeMessage() {
@@ -293,7 +288,6 @@ function welcomeMessage() {
   welcomeBubbleEl = bubble;
   renderModeSummary();
   $("chatThread").appendChild(group);
-  loadDefaultRubric(bubble);
 }
 
 function renderModeSummary() {
