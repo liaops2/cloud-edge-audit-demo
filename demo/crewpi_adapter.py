@@ -415,9 +415,10 @@ def _load_crewpi_env() -> None:
             continue
         key, _, value = item.partition("=")
         os.environ.setdefault(key.strip(), value.strip().strip("'\""))
+    # SiliconFlow/TaoToken are reached directly (domestic); a local proxy in the
+    # launch env (socks:// OR http://) makes httpx hang the cloud calls. Strip all.
     for key in ("ALL_PROXY", "all_proxy", "HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy"):
-        if os.environ.get(key, "").startswith("socks://"):
-            os.environ.pop(key, None)
+        os.environ.pop(key, None)
 
 
 def _read_transcript_text(path: Path) -> str:
