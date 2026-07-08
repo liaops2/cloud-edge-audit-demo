@@ -110,12 +110,9 @@ function setStep(stepEls, stage, status) {
 function formatStageDetail(event) {
   const payload = event.payload || {};
   if (event.stage === "score") return "";
-  const parts = [];
-  if (payload.plan_preview) parts.push(`【计划】\n${payload.plan_preview}`);
-  if (payload.prompt_preview) parts.push(`【下发】\n${payload.prompt_preview}`);
-  if (payload.execution_preview) parts.push(`【执行】\n${payload.execution_preview}`);
-  if (payload.issues?.length) parts.push(`【问题】\n${payload.issues.join("\n")}`);
-  return parts.join("\n\n");
+  // Keep only key info: audit/execution findings. Drop verbose plan/prompt/exec dumps.
+  if (payload.issues?.length) return `【问题】\n${payload.issues.join("\n")}`;
+  return "";
 }
 
 function renderRubricPanel(container, rubric, { before } = {}) {
@@ -464,11 +461,8 @@ async function sendMessage() {
   }
 
   const runData = await res.json();
-  const { run_id, rubric } = runData;
+  const { run_id } = runData;
   activeRunId = run_id;
-  if (rubric) {
-    renderRubricPanel(runUi.bubble, rubric, { before: runUi.bubble.firstChild });
-  }
   runUi.statusLine.innerHTML = `<strong>运行中</strong> <span style="color:var(--muted)">${escapeHtml(run_id)}</span>`;
 
   const es = new EventSource(`/api/runs/${run_id}/events`);
@@ -496,9 +490,6 @@ async function sendMessage() {
     if (event.stage === "score") {
       const payload = event.payload || {};
       renderScoreBlock(runUi.bubble, payload, event.status);
-      if (payload.rubric) {
-        renderRubricPanel(runUi.bubble, payload.rubric, { before: runUi.bubble.firstChild });
-      }
     }
 
     if (event.stage === "done") {
