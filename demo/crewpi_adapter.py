@@ -28,10 +28,26 @@ class CrewPiDemoResult:
     execution_result: str
     grade: PinchBenchGrade
     raw: dict[str, Any]
+    # Cloud audit's own verdict (privacy-bounded: judged from reported results,
+    # not the workspace). Distinct from the PinchBench rubric score.
+    audit_status: str | None = None
+    audit_confidence: float | None = None
+    audit_findings: list[str] | None = None
 
 
 def crewpi_enabled() -> bool:
     return os.environ.get("DEMO_BACKEND", "").strip().lower() == "crewpi"
+
+
+def crewpi_segmented_enabled() -> bool:
+    """Opt-in: run the new segmented edge-execution path (warm multi-step Pi
+    session + single end-of-run audit) instead of the legacy per-step run()."""
+    return os.environ.get("DEMO_CREWPI_SEGMENTED", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 def run_crewpi_pinchbench_task(
@@ -59,7 +75,11 @@ def run_crewpi_pinchbench_task(
     planner_client = build_default_planner_client() if mode == "crewpi" else None
     audit_judge_client = build_default_audit_judge_client() if mode == "crewpi" else None
     if mode == "crewpi":
-        crewpi_runner.build_planning_goal = _build_demo_planning_goal
+        crewpi_runner.build_planning_goal = (
+            _build_demo_planning_goal_multistep
+            if crewpi_segmented_enabled()
+            else _build_demo_planning_goal
+        )
 
     result = run_task(
         pinchbench_dir=pinchbench_dir,
@@ -75,24 +95,71 @@ def run_crewpi_pinchbench_task(
         cloud_control_max_validation_retries=int(os.environ.get("DEMO_CREWPI_VALIDATION_RETRIES", "5")),
         judge_max_validation_retries=int(os.environ.get("DEMO_CREWPI_JUDGE_RETRIES", "5")),
         execution_mode=mode,
+        segmented=mode == "crewpi" and crewpi_segmented_enabled(),
     )
     raw = result.to_dict()
     transcript_path = Path(raw["transcript_path"])
     execution_result = _read_transcript_text(transcript_path)
     grade = _grade_from_crewpi(raw)
+    trace_path = Path(raw["crewpi_trace_path"])
+    audit_status, audit_confidence, audit_findings = _read_last_audit(trace_path)
     return CrewPiDemoResult(
         run_id=str(raw["run_id"]),
         task_id=str(raw["task_id"]),
         mode=mode,
         status=str(raw["status"]),
         workspace=Path(raw["workspace"]),
-        trace_path=Path(raw["crewpi_trace_path"]),
+        trace_path=trace_path,
         transcript_path=transcript_path,
         result_path=Path(raw["result_path"]),
         execution_result=execution_result,
         grade=grade,
         raw=raw,
+        audit_status=audit_status,
+        audit_confidence=audit_confidence,
+        audit_findings=audit_findings,
     )
+
+
+def _read_last_audit(trace_path: Path) -> tuple[str | None, float | None, list[str]]:
+    """Extract the cloud audit's own verdict from the trace's last audit event.
+
+    run_task's result dict does not carry the audit findings/confidence, so we
+    read them from the JSONL trace. When the model returns no explicit findings,
+    fall back to the rework specs' reasons so the audit's reasoning is still shown.
+    """
+    if not trace_path.is_file():
+        return None, None, []
+    last: dict[str, Any] | None = None
+    for line in trace_path.read_text(encoding="utf-8").splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if (event.get("type") or event.get("event")) == "audit":
+            last = event.get("data", event)
+    if last is None:
+        return None, None, []
+    status = str(last.get("status")) if last.get("status") is not None else None
+    confidence = last.get("metadata", {}).get("confidence")
+    confidence = float(confidence) if confidence is not None else None
+    findings = [str(item) for item in (last.get("findings") or []) if str(item).strip()]
+    if not findings:
+        seen: set[str] = set()
+        for spec in last.get("rework_specs") or []:
+            reason = str(spec.get("reason") or "").strip()
+            if reason and reason not in seen:
+                seen.add(reason)
+                findings.append(reason)
+    if not findings and status and status not in {"done", "pass", "approved"}:
+        # needs_replan often carries no explicit evidence: make the bare verdict readable.
+        action = str(last.get("next_action") or "").strip()
+        note = f"审计裁决 {status}"
+        if action:
+            note += f"（建议 {action}）"
+        note += "：凭端侧上报结果未能确认全部验收，且未附具体证据。"
+        findings.append(note)
+    return status, confidence, findings
 
 
 def _build_demo_runner(mode: CrewPiMode) -> tuple[Any, Path]:
@@ -205,8 +272,13 @@ def run_crewpi_freeform_task(
             trace_uploader=trace_uploader,
             memory_provider=NullMemoryProvider(),
         )
+        orchestrator_run = (
+            orchestrator.run_segmented
+            if crewpi_segmented_enabled()
+            else orchestrator.run
+        )
         result = asyncio.run(
-            orchestrator.run(goal=goal, workspace_dir=str(workspace), run_id=run_id)
+            orchestrator_run(goal=goal, workspace_dir=str(workspace), run_id=run_id)
         )
         status = str(result.status)
         audit_pass = result.status == RunStatus.DONE
@@ -269,6 +341,32 @@ def _build_demo_planning_goal(task: Any) -> str:
         "Do not create a separate read-only verification step. "
         "Do not use /workspace, /tmp, /home, or host-specific absolute paths unless the task explicitly requires an absolute path. "
         "The step output must include concise evidence that every grading criterion is satisfied."
+    )
+
+
+def _build_demo_planning_goal_multistep(task: Any) -> str:
+    """Segmented-mode planning goal: allow the planner to emit MULTIPLE steps so
+    the edge runs them as one warm multi-step Pi session (the segmented showcase).
+    The single-step override (`_build_demo_planning_goal`) collapses every plan to
+    one step, which structurally defeats warm sessions."""
+    criteria = "\n".join(f"- {item}" for item in task.grading_criteria) or "- Complete the task and return evidence."
+    return (
+        f"PinchBench task id: {task.task_id}\n"
+        f"Name: {task.name}\n"
+        f"Category: {task.category}\n"
+        f"Prompt:\n{task.prompt}\n\n"
+        f"Expected behavior:\n{task.expected_behavior}\n\n"
+        f"Acceptance criteria / grading criteria:\n{criteria}\n\n"
+        "Break the work into as many small, ordered edge-executable steps as the task "
+        "naturally needs (typically 2-5). Each step should accomplish one coherent unit of "
+        "work so a single edge agent session can carry them out in sequence. "
+        "Prefer the exec tool with concrete shell commands; use read/apply_patch only when "
+        "editing existing files. "
+        "The execution process current working directory is already the task workspace. "
+        "Use only relative paths such as src/main.py, README.md, and .gitignore. "
+        "Do not use /workspace, /tmp, /home, or host-specific absolute paths unless the task "
+        "explicitly requires an absolute path. "
+        "The final step's output must include concise evidence that every grading criterion is satisfied."
     )
 
 

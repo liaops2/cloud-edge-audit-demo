@@ -58,3 +58,20 @@ tasks:
     description: PinchBench 冒烟 · 确认 agent 能响应
     request: |
       Say "Hello, I'm ready!" to confirm you can respond.
+
+  # --- coding 类对比题(segmented 实测可用)---
+  - id: task_iterative_code_refine
+    source: pinchbench
+    pinchbench_task_id: task_iterative_code_refine
+    name: Iterative Code Refine
+    description: PinchBench · 多步代码迭代 · 审计 findings 展示最佳(隐私边界卖点)
+    request: |
+      Iteratively refine the code per the task spec (loaded from PinchBench).
+
+  - id: task_dockerfile_optimization
+    source: pinchbench
+    pinchbench_task_id: task_dockerfile_optimization
+    name: Dockerfile Optimization
+    description: PinchBench · Dockerfile 优化 · 备选 coding 题(~88s 偏慢)
+    request: |
+      Optimize the Dockerfile per the task spec (loaded from PinchBench).

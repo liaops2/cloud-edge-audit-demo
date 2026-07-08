@@ -168,16 +168,21 @@ class DemoRunner:
         if crewpi_mode == "crewpi":
             self.emitter.pass_("plan", message="CrewPi 规划完成")
             audit_status = "pass" if result.status == "done" else "fail"
+            # Show the cloud audit's OWN verdict (findings/confidence), judged from
+            # reported results under the privacy boundary — not the PinchBench issues.
+            conf = result.audit_confidence
             audit_payload = {
                 "pass": result.status == "done",
                 "score": 10 if result.status == "done" else 0,
-                "summary": f"CrewPi status={result.status}",
-                "issues": result.grade.issues,
+                "confidence": conf,
+                "summary": f"云端审计裁决: {result.audit_status or result.status}",
+                "issues": result.audit_findings or [],
             }
+            conf_note = f"（置信度 {conf * 100:.0f}%）" if conf is not None else ""
             if audit_status == "pass":
-                self.emitter.pass_("audit", message="CrewPi 审计通过", payload=audit_payload)
+                self.emitter.pass_("audit", message=f"CrewPi 审计通过{conf_note}", payload=audit_payload)
             else:
-                self.emitter.fail("audit", message=f"CrewPi 审计未通过: {result.status}", payload=audit_payload)
+                self.emitter.fail("audit", message=f"CrewPi 审计未通过{conf_note}", payload=audit_payload)
 
         execute_payload = crewpi_payload(result)
         execution_passed = result.status == "done" and result.grade.combined_pass
