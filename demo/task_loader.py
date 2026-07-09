@@ -73,7 +73,7 @@ def match_task_for_message(message: str) -> dict[str, Any] | None:
 def task_from_message(message: str, *, task_id: str | None = None) -> dict[str, Any]:
     text = message.strip()
     if not text:
-        raise ValueError("消息不能为空")
+        raise ValueError("Message cannot be empty")
 
     if task_id:
         base = get_task(task_id)
@@ -85,7 +85,7 @@ def task_from_message(message: str, *, task_id: str | None = None) -> dict[str, 
 
     return {
         "id": "chat",
-        "name": "对话任务",
+        "name": "Chat task",
         "request": text,
         "source": "chat",
     }

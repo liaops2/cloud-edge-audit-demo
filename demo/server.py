@@ -65,8 +65,8 @@ def _default_mode() -> DemoMode:
 
 def _profile_label(mode: DemoMode) -> str:
     if mode == "cloud_edge":
-        return "机器 B · 端云审计（云端规划/审计门禁）"
-    return "机器 A · 本地 Agent（直连执行）"
+        return "Machine B · Cloud-Edge Audit (cloud plan / audit gate)"
+    return "Machine A · Local Agent (direct execution)"
 
 
 @app.get("/api/config")
@@ -139,7 +139,7 @@ async def api_run(body: RunRequest) -> RunResponse:
                 run_id=run_id,
                 stage="done",
                 status="fail",
-                message=f"运行异常: {exc}",
+                message=f"Run error: {exc}",
                 payload={"error": str(exc)},
             )
             asyncio.run_coroutine_threadsafe(queue.put(err), loop)

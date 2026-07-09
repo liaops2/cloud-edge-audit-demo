@@ -122,9 +122,9 @@ class DemoRunner:
                 return self._run_crewpi_backend()
             if self.state.mode == "cloud_edge":
                 return self._run_cloud_edge()
-            self.emitter.skip("recall", message="Demo 模式不启用记忆召回")
-            self.emitter.skip("plan", message="本地 Agent：跳过云端规划")
-            self.emitter.skip("audit", message="本地 Agent：跳过云端审计")
+            self.emitter.skip("recall", message="Demo mode: memory recall disabled")
+            self.emitter.skip("plan", message="Local Agent: skip cloud planning")
+            self.emitter.skip("audit", message="Local Agent: skip cloud audit")
             return self._run_local_direct()
         except RunCancelled:
             self._emit_cancelled()
@@ -139,21 +139,21 @@ class DemoRunner:
             # Free-form user question: no PinchBench rubric, surface audit verdict.
             return self._run_crewpi_freeform(crewpi_mode)
 
-        self.emitter.skip("recall", message="CrewPi memory 默认关闭")
+        self.emitter.skip("recall", message="CrewPi memory off by default")
         if crewpi_mode == "pi_only":
-            self.emitter.skip("plan", message="CrewPi Pi-only：跳过云端规划")
-            self.emitter.skip("audit", message="CrewPi Pi-only：跳过云端审计")
+            self.emitter.skip("plan", message="CrewPi Pi-only: skip cloud planning")
+            self.emitter.skip("audit", message="CrewPi Pi-only: skip cloud audit")
         else:
-            self.emitter.running("plan", message="CrewPi 云端规划中…")
-            self.emitter.running("audit", message="CrewPi 云端审计待执行…")
+            self.emitter.running("plan", message="CrewPi cloud planning…")
+            self.emitter.running("audit", message="CrewPi cloud audit pending…")
 
         self._guard_cancel()
         self.emitter.running(
             "execute",
             message=(
-                "CrewPi Pi-only → 本地 Pi Agent…"
+                "CrewPi Pi-only → local Pi agent…"
                 if crewpi_mode == "pi_only"
-                else "CrewPi 规划/执行/审计 → 本地 Pi Agent…"
+                else "CrewPi plan/execute/audit → local Pi agent…"
             ),
             payload={"prompt_preview": preview_text(self.state.user_request, 400)},
         )
@@ -166,7 +166,7 @@ class DemoRunner:
         self.state.execution_result = result.execution_result
         self.state.grade = result.grade
         if crewpi_mode == "crewpi":
-            self.emitter.pass_("plan", message="CrewPi 规划完成")
+            self.emitter.pass_("plan", message="CrewPi planning done")
             audit_status = "pass" if result.status == "done" else "fail"
             # Show the cloud audit's OWN verdict (findings/confidence), judged from
             # reported results under the privacy boundary — not the PinchBench issues.
@@ -175,27 +175,27 @@ class DemoRunner:
                 "pass": result.status == "done",
                 "score": 10 if result.status == "done" else 0,
                 "confidence": conf,
-                "summary": f"云端审计裁决: {result.audit_status or result.status}",
+                "summary": f"Cloud audit verdict: {result.audit_status or result.status}",
                 "issues": result.audit_findings or [],
             }
-            conf_note = f"（置信度 {conf * 100:.0f}%）" if conf is not None else ""
+            conf_note = f" (confidence {conf * 100:.0f}%)" if conf is not None else ""
             if audit_status == "pass":
-                self.emitter.pass_("audit", message=f"CrewPi 审计通过{conf_note}", payload=audit_payload)
+                self.emitter.pass_("audit", message=f"CrewPi audit passed{conf_note}", payload=audit_payload)
             else:
-                self.emitter.fail("audit", message=f"CrewPi 审计未通过{conf_note}", payload=audit_payload)
+                self.emitter.fail("audit", message=f"CrewPi audit failed{conf_note}", payload=audit_payload)
 
         execute_payload = crewpi_payload(result)
         execution_passed = result.status == "done" and result.grade.combined_pass
         if execution_passed:
             self.emitter.pass_(
                 "execute",
-                message="CrewPi 执行完成",
+                message="CrewPi execution done",
                 payload=execute_payload,
             )
         else:
             self.emitter.fail(
                 "execute",
-                message=f"CrewPi 执行未达标: {result.status}",
+                message=f"CrewPi execution below bar: {result.status}",
                 payload={
                     **execute_payload,
                     "issues": result.grade.issues,
@@ -205,21 +205,21 @@ class DemoRunner:
         return self.state
 
     def _run_crewpi_freeform(self, crewpi_mode: str) -> DemoRunState:
-        self.emitter.skip("recall", message="CrewPi memory 默认关闭")
+        self.emitter.skip("recall", message="CrewPi memory off by default")
         if crewpi_mode == "pi_only":
-            self.emitter.skip("plan", message="CrewPi Pi-only：跳过云端规划")
-            self.emitter.skip("audit", message="CrewPi Pi-only：跳过云端审计")
+            self.emitter.skip("plan", message="CrewPi Pi-only: skip cloud planning")
+            self.emitter.skip("audit", message="CrewPi Pi-only: skip cloud audit")
         else:
-            self.emitter.running("plan", message="CrewPi 云端规划中…")
-            self.emitter.running("audit", message="CrewPi 云端审计待执行…")
+            self.emitter.running("plan", message="CrewPi cloud planning…")
+            self.emitter.running("audit", message="CrewPi cloud audit pending…")
 
         self._guard_cancel()
         self.emitter.running(
             "execute",
             message=(
-                "CrewPi Pi-only → 本地 Pi Agent…"
+                "CrewPi Pi-only → local Pi agent…"
                 if crewpi_mode == "pi_only"
-                else "CrewPi 规划/执行/审计 → 本地 Pi Agent…"
+                else "CrewPi plan/execute/audit → local Pi agent…"
             ),
             payload={"prompt_preview": preview_text(self.state.user_request, 400)},
         )
@@ -233,23 +233,23 @@ class DemoRunner:
         execution_ok = result.status == "done"
 
         if crewpi_mode == "crewpi":
-            self.emitter.pass_("plan", message="CrewPi 规划完成")
+            self.emitter.pass_("plan", message="CrewPi planning done")
             audit_payload = {
                 "pass": bool(result.audit_pass),
                 "confidence": result.audit_confidence,
-                "summary": f"CrewPi 审计 status={result.audit_status}",
+                "summary": f"CrewPi audit status={result.audit_status}",
                 "issues": result.audit_findings,
             }
             if result.audit_pass:
-                self.emitter.pass_("audit", message="CrewPi 审计通过", payload=audit_payload)
+                self.emitter.pass_("audit", message="CrewPi audit passed", payload=audit_payload)
             else:
-                self.emitter.fail("audit", message="CrewPi 审计未通过", payload=audit_payload)
+                self.emitter.fail("audit", message="CrewPi audit failed", payload=audit_payload)
 
         exec_payload = {"execution_preview": preview_text(result.execution_result, 1200)}
         if execution_ok:
-            self.emitter.pass_("execute", message="CrewPi 执行完成", payload=exec_payload)
+            self.emitter.pass_("execute", message="CrewPi execution done", payload=exec_payload)
         else:
-            self.emitter.fail("execute", message=f"CrewPi 执行未完成: {result.status}", payload=exec_payload)
+            self.emitter.fail("execute", message=f"CrewPi execution incomplete: {result.status}", payload=exec_payload)
 
         self._emit_audit_score(crewpi_mode, result)
         return self.state
@@ -257,10 +257,10 @@ class DemoRunner:
     def _emit_audit_score(self, crewpi_mode: str, result: CrewPiFreeformResult) -> None:
         if crewpi_mode == "pi_only":
             # Local direct has no audit gate; a free-form question has no PinchBench rubric.
-            self.emitter.skip("score", message="本地直连无审计门禁 · 自由问题无 PinchBench 评分")
+            self.emitter.skip("score", message="Local direct has no audit gate · free-form has no PinchBench score")
             self.emitter.pass_(
                 "done",
-                message="运行结束",
+                message="Run finished",
                 payload={"mode": self.state.mode, "task_id": self.state.task_id},
             )
             return
@@ -271,20 +271,20 @@ class DemoRunner:
             # Audit is a binary gate; headline reflects pass/fail, not a rubric %.
             "score": 10 if passed else 0,
             "pass": passed,
-            "pinchbench_type": "审计门禁",
+            "pinchbench_type": "Audit gate",
             "issues": result.audit_findings,
         }
         conf_note = ""
         if confidence is not None and abs(confidence - 0.5) > 1e-9:
-            conf_note = f"（置信度 {confidence * 100:.0f}%）"
-        msg = f"{'通过' if passed else '未通过'} · 审计门禁{conf_note}"
+            conf_note = f" (confidence {confidence * 100:.0f}%)"
+        msg = f"{'Pass' if passed else 'Fail'} · Audit gate{conf_note}"
         if passed:
             self.emitter.pass_("score", message=msg, payload=payload)
         else:
             self.emitter.fail("score", message=msg, payload=payload)
         self.emitter.pass_(
             "done",
-            message="运行结束",
+            message="Run finished",
             payload={"mode": self.state.mode, "task_id": self.state.task_id},
         )
 
@@ -303,7 +303,7 @@ class DemoRunner:
         return self.state
 
     def _run_cloud_edge(self) -> DemoRunState:
-        self.emitter.skip("recall", message="Demo 简化：未接 memory-server")
+        self.emitter.skip("recall", message="Demo simplified: no memory-server")
         self._guard_cancel()
         self._run_plan()
 
@@ -334,7 +334,7 @@ class DemoRunner:
             hints = self.state.audit_report.rework_hints if self.state.audit_report else ""
             self.emitter.running(
                 "execute",
-                message=f"审计/评分未通过，rework {self.state.rework_count}/{self.state.max_reworks}",
+                message=f"Audit/score failed, rework {self.state.rework_count}/{self.state.max_reworks}",
                 payload={
                     **grade.to_score_payload(),
                     "audit_pass": audit_ok,
@@ -378,12 +378,12 @@ class DemoRunner:
         )
 
     def _run_audit(self) -> AuditReport:
-        self.emitter.running("audit", message="DeepSeek main-audit 审计执行结果…")
+        self.emitter.running("audit", message="DeepSeek main-audit reviewing execution…")
         llm = build_llm()
         auditor = Agent(
-            role="审计员",
-            goal="评审边侧是否实际完成任务，拒绝只提问不执行的汇报",
-            backstory="你是严格的 main-audit 审计员，只评审不改文件。",
+            role="Auditor",
+            goal="Judge whether the edge actually completed the task; reject reports that only ask questions without executing",
+            backstory="You are a strict main-audit auditor; you only review and never modify files.",
             llm=llm,
             verbose=False,
         )
@@ -403,12 +403,12 @@ class DemoRunner:
         try:
             report = self._parse_audit_report(crew.kickoff())
         except (ValueError, ValidationError, json.JSONDecodeError) as exc:
-            self.emitter.fail("audit", message=f"审计解析失败: {exc}")
+            self.emitter.fail("audit", message=f"Audit parse failed: {exc}")
             report = AuditReport(
                 pass_=False,
                 score=0,
                 summary=str(exc),
-                issues=["审计 JSON 解析失败"],
+                issues=["Audit JSON parse failed"],
                 rework_hints="",
             )
 
@@ -421,19 +421,19 @@ class DemoRunner:
             "rework_hints": report.rework_hints,
         }
         if report.passed(self.state.pass_score):
-            self.emitter.pass_("audit", message=f"审计 score={report.score}/10", payload=payload)
+            self.emitter.pass_("audit", message=f"Audit score={report.score}/10", payload=payload)
         else:
-            self.emitter.fail("audit", message=f"审计 score={report.score}/10", payload=payload)
+            self.emitter.fail("audit", message=f"Audit score={report.score}/10", payload=payload)
         return report
 
     def _run_plan(self) -> None:
         self._guard_cancel()
-        self.emitter.running("plan", message="DeepSeek 生成结构化计划…")
+        self.emitter.running("plan", message="DeepSeek generating structured plan…")
         llm = build_llm()
         planner = Agent(
-            role="规划师",
-            goal="输出可供本地执行 Agent 执行的结构化计划",
-            backstory="你熟悉 M1c 规划规范，只规划不执行。",
+            role="Planner",
+            goal="Produce a structured plan the local execution agent can run",
+            backstory="You know the M1c planning spec; you only plan and never execute.",
             llm=llm,
             verbose=False,
         )
@@ -446,7 +446,7 @@ class DemoRunner:
         self.state.plan_text = (result.raw or "").strip()
         self.emitter.pass_(
             "plan",
-            message="规划完成",
+            message="Planning done",
             payload={"plan_preview": preview_text(self.state.plan_text, 800)},
         )
 
@@ -454,7 +454,7 @@ class DemoRunner:
         prompt = self._normalize_execution_prompt(prompt)
         self.emitter.running(
             "execute",
-            message="OpenClaw A2A → 本地执行 Agent…",
+            message="OpenClaw A2A → local execution agent…",
             payload={"prompt_preview": preview_text(prompt, 400)},
         )
         timeout_s = int(os.environ.get("DEMO_EXECUTE_TIMEOUT_S", "300"))
@@ -475,18 +475,18 @@ class DemoRunner:
             self.state.execution_result = result.text.strip()
             self.emitter.pass_(
                 "execute",
-                message="本地 Agent 执行完成",
+                message="Local Agent execution done",
                 payload={"execution_preview": preview_text(self.state.execution_result)},
             )
         except RunCancelled:
             raise
         except Exception as exc:
             if _should_cancel() or "cancelled by user" in str(exc).lower():
-                raise RunCancelled("用户已终止任务") from exc
+                raise RunCancelled("User cancelled the run") from exc
             self.state.execution_result = str(exc)
             self.emitter.fail(
                 "execute",
-                message=f"执行失败: {exc}",
+                message=f"Execution failed: {exc}",
                 payload={"error": str(exc)},
             )
             raise
@@ -515,12 +515,12 @@ class DemoRunner:
     def _emit_cancelled(self) -> None:
         self.emitter.fail(
             "execute",
-            message="已终止",
+            message="Cancelled",
             payload={"cancelled": True},
         )
         self.emitter.fail(
             "done",
-            message="用户已终止任务",
+            message="User cancelled the run",
             payload={"cancelled": True, "mode": self.state.mode, "task_id": self.state.task_id},
         )
 
@@ -547,14 +547,14 @@ class DemoRunner:
             f"(threshold {grade.pass_threshold}) pass={passed}\n"
             f"{grade.notes}"
         )
-        msg = f"{'通过' if passed else '未通过'} · {pct:.0f}% ({grade.combined_score:.3f}/1.0)"
+        msg = f"{'Pass' if passed else 'Fail'} · {pct:.0f}% ({grade.combined_score:.3f}/1.0)"
         if passed:
             self.emitter.pass_("score", message=msg, payload=payload)
         else:
             self.emitter.fail("score", message=msg, payload=payload)
         self.emitter.pass_(
             "done",
-            message="运行结束",
+            message="Run finished",
             payload={
                 "mode": self.state.mode,
                 "task_id": self.state.task_id,

@@ -1,9 +1,9 @@
 const STAGES = [
-  { id: "recall", label: "记忆召回" },
-  { id: "plan", label: "规划" },
-  { id: "execute", label: "执行" },
-  { id: "audit", label: "审计" },
-  { id: "score", label: "评分" },
+  { id: "recall", label: "Recall" },
+  { id: "plan", label: "Plan" },
+  { id: "execute", label: "Execute" },
+  { id: "audit", label: "Audit" },
+  { id: "score", label: "Score" },
 ];
 
 const STAGE_LABELS = Object.fromEntries(STAGES.map((s) => [s.id, s.label]));
@@ -26,23 +26,23 @@ const MODE_HINTS = {
 };
 
 const MODE_LABELS = {
-  local_direct: "本地 Agent",
-  cloud_edge: "端云审计",
+  local_direct: "Local Agent",
+  cloud_edge: "Cloud-Edge Audit",
 };
 
 const MODE_RUBRIC_NOTES = {
-  local_direct: "规则评分。",
-  cloud_edge: "规划 + 审计。",
+  local_direct: "Rule-based grading.",
+  cloud_edge: "Plan + audit.",
 };
 
 const CRITERIA_SUMMARIES = {
-  "Directory `src/` created": "创建 src/ 目录",
-  "File `src/main.py` created": "创建 src/main.py",
-  "`src/main.py` contains valid Python hello world code": "main.py 能输出 hello world",
-  "File `README.md` created": "创建 README.md",
-  "`README.md` contains a project title/heading": "README.md 包含项目标题",
-  "File `.gitignore` created": "创建 .gitignore",
-  "`.gitignore` contains `__pycache__` entry": ".gitignore 忽略 __pycache__",
+  "Directory `src/` created": "Create src/ directory",
+  "File `src/main.py` created": "Create src/main.py",
+  "`src/main.py` contains valid Python hello world code": "main.py prints hello world",
+  "File `README.md` created": "Create README.md",
+  "`README.md` contains a project title/heading": "README.md has a project title",
+  "File `.gitignore` created": "Create .gitignore",
+  "`.gitignore` contains `__pycache__` entry": ".gitignore ignores __pycache__",
 };
 
 function $(id) {
@@ -62,7 +62,7 @@ function createChatGroup(role) {
 
   const avatar = document.createElement("div");
   avatar.className = "chat-avatar";
-  avatar.textContent = role === "user" ? "你" : "AI";
+  avatar.textContent = role === "user" ? "You" : "AI";
 
   const messages = document.createElement("div");
   messages.className = "chat-group-messages";
@@ -111,7 +111,7 @@ function formatStageDetail(event) {
   const payload = event.payload || {};
   if (event.stage === "score") return "";
   // Keep only key info: audit/execution findings. Drop verbose plan/prompt/exec dumps.
-  if (payload.issues?.length) return `【问题】\n${payload.issues.join("\n")}`;
+  if (payload.issues?.length) return `[Issues]\n${payload.issues.join("\n")}`;
   return "";
 }
 
@@ -126,7 +126,7 @@ function renderRubricPanel(container, rubric, { before } = {}) {
   panel.open = true;
 
   const summary = document.createElement("summary");
-  summary.textContent = `评分摘要 · ${rubric.name || rubric.task_id}`;
+  summary.textContent = `Grading summary · ${rubric.name || rubric.task_id}`;
   panel.appendChild(summary);
 
   const body = document.createElement("div");
@@ -138,7 +138,7 @@ function renderRubricPanel(container, rubric, { before } = {}) {
   body.appendChild(meta);
 
   if (rubric.grading_criteria?.length) {
-    body.appendChild(rubricSectionTitle("检查要点"));
+    body.appendChild(rubricSectionTitle("Checklist"));
     const ul = document.createElement("ul");
     ul.className = "rubric-list";
     ul.innerHTML = summarizeCriteria(rubric.grading_criteria)
@@ -163,21 +163,21 @@ function renderRubricPanel(container, rubric, { before } = {}) {
 
 function summarizePassRule(rubric) {
   if (rubric.task_id === "task_files") {
-    return "通过条件：创建 src/main.py、README.md、.gitignore，且关键内容检查全部通过。";
+    return "Pass when: src/main.py, README.md and .gitignore are created and all content checks pass.";
   }
   if (rubric.task_id === "task_weather") {
-    return "通过条件：创建可运行的 weather.py，并能获取旧金山天气数据后输出摘要。";
+    return "Pass when: a runnable weather.py is created that fetches SF weather and prints a summary.";
   }
   if (rubric.task_id === "task_sanity") {
-    return "通过条件：Agent 能按要求返回准备就绪的确认消息。";
+    return "Pass when: the agent returns the requested ready confirmation.";
   }
   if (rubric.grading_type === "automated") {
-    return "通过条件：规则检查项全部通过。";
+    return "Pass when: all rule-based checks pass.";
   }
   if (rubric.grading_type === "hybrid") {
-    return "通过条件：规则检查和模型评审的综合评分达到门禁。";
+    return "Pass when: the combined rule + LLM-judge score meets the threshold.";
   }
-  return "通过条件：模型评审分数达到门禁。";
+  return "Pass when: the LLM-judge score meets the threshold.";
 }
 
 function summarizeCriteria(criteria) {
@@ -186,11 +186,11 @@ function summarizeCriteria(criteria) {
     criteria.includes("File `.gitignore` created")
   ) {
     return [
-      "创建 src/ 目录和 src/main.py",
-      "main.py 能输出 hello world",
-      "创建 README.md",
-      "README.md 包含项目标题",
-      ".gitignore 忽略 __pycache__",
+      "Create src/ directory and src/main.py",
+      "main.py prints hello world",
+      "Create README.md",
+      "README.md has a project title",
+      ".gitignore ignores __pycache__",
     ];
   }
 
@@ -198,7 +198,7 @@ function summarizeCriteria(criteria) {
   if (summarized.length <= 5) return summarized;
 
   const mustHave = summarized.filter((item) =>
-    /创建|包含|输出|获取|确认|hello world|README|gitignore|weather/i.test(item)
+    /create|contain|print|fetch|confirm|hello world|README|gitignore|weather/i.test(item)
   );
   const picked = (mustHave.length ? mustHave : summarized).slice(0, 5);
   return [...new Set(picked)];
@@ -222,9 +222,9 @@ function renderScoreBlock(container, payload, status) {
   const type = payload.pinchbench_type ? ` · ${payload.pinchbench_type}` : "";
   block.innerHTML = `
     <div class="score-inline__head">
-      <div class="score-inline__state">${passed ? "通过" : "未通过"}</div>
+      <div class="score-inline__state">${passed ? "Pass" : "Fail"}</div>
       <div class="score-inline__value">${pct}%</div>
-      <div class="score-inline__label">${passed ? "完成" : "评分"}${type}</div>
+      <div class="score-inline__label">${passed ? "Done" : "Score"}${type}</div>
     </div>
   `;
   const issues = payload.issues || [];
@@ -245,7 +245,7 @@ function createAssistantRunBubble() {
   const { strip, stepEls } = buildPipelineStrip();
   const statusLine = document.createElement("div");
   statusLine.className = "stage-line";
-  statusLine.innerHTML = "<strong>处理中</strong> …";
+  statusLine.innerHTML = "<strong>Processing</strong> …";
 
   const detail = document.createElement("pre");
   detail.className = "stage-detail";
@@ -297,7 +297,7 @@ function renderModeSummary() {
   }
 
   modeSummaryEl.innerHTML = `
-    <div class="mode-summary__eyebrow">当前对比模式</div>
+    <div class="mode-summary__eyebrow">Current mode</div>
     <div class="mode-summary__title">${escapeHtml(MODE_LABELS[selectedMode])}</div>
     <div class="mode-summary__body">${escapeHtml(MODE_HINTS[selectedMode])}</div>
   `;
@@ -380,7 +380,7 @@ function setBusy(next) {
   const btn = $("sendBtn");
   btn.disabled = false;
   btn.classList.toggle("is-cancel", next);
-  btn.title = next ? "终止任务" : "发送";
+  btn.title = next ? "Cancel" : "Send";
   $("messageInput").disabled = next;
   $("modeLocal").disabled = next;
   $("modeCloud").disabled = next;
@@ -445,7 +445,7 @@ async function sendMessage() {
       body: JSON.stringify(body),
     });
   } catch {
-    runUi.statusLine.innerHTML = "<strong>错误</strong> 无法连接服务";
+    runUi.statusLine.innerHTML = "<strong>Error</strong> cannot reach server";
     runUi.indicator.remove();
     setBusy(false);
     return;
@@ -454,7 +454,7 @@ async function sendMessage() {
   if (!res.ok) {
     const err = await res.text();
     runUi.bubble.classList.remove("streaming");
-    runUi.statusLine.innerHTML = `<strong>启动失败</strong> ${escapeHtml(err)}`;
+    runUi.statusLine.innerHTML = `<strong>Start failed</strong> ${escapeHtml(err)}`;
     runUi.indicator.remove();
     setBusy(false);
     return;
@@ -463,7 +463,7 @@ async function sendMessage() {
   const runData = await res.json();
   const { run_id } = runData;
   activeRunId = run_id;
-  runUi.statusLine.innerHTML = `<strong>运行中</strong> <span style="color:var(--muted)">${escapeHtml(run_id)}</span>`;
+  runUi.statusLine.innerHTML = `<strong>Running</strong> <span style="color:var(--muted)">${escapeHtml(run_id)}</span>`;
 
   const es = new EventSource(`/api/runs/${run_id}/events`);
   activeEs = es;
@@ -495,7 +495,7 @@ async function sendMessage() {
     if (event.stage === "done") {
       runUi.bubble.classList.remove("streaming");
       runUi.indicator.remove();
-      runUi.statusLine.innerHTML = `<strong>完成</strong> · ${escapeHtml(event.message || "运行结束")}`;
+      runUi.statusLine.innerHTML = `<strong>Done</strong> · ${escapeHtml(event.message || "Run finished")}`;
       es.close();
       clearActiveRun();
       setBusy(false);
@@ -507,7 +507,7 @@ async function sendMessage() {
     es.close();
     runUi.bubble.classList.remove("streaming");
     runUi.indicator.remove();
-    runUi.statusLine.innerHTML = "<strong>中断</strong> SSE 连接断开";
+    runUi.statusLine.innerHTML = "<strong>Interrupted</strong> SSE disconnected";
     clearActiveRun();
     setBusy(false);
   };

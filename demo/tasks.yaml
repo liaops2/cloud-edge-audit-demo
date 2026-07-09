@@ -1,10 +1,10 @@
 tasks:
-  # === 强对比题(现场主用，pi_only 崩 / 端云成)===
+  # === Strong-contrast tasks (pi_only fails / cloud-edge succeeds) ===
   - id: task_cron_organizer
     source: pinchbench
     pinchbench_task_id: task_cron_organizer
-    name: Cron 排班
-    description: 强对比 · 10 条自然语言排班转 cron
+    name: Cron schedules
+    description: strong contrast · 10 NL schedules -> cron
     request: |
       Convert the following natural language schedule descriptions into properly formatted cron expressions. Save the results to `cron_expressions.json` as a JSON array.
 
@@ -29,8 +29,8 @@ tasks:
   - id: task_calendar
     source: pinchbench
     pinchbench_task_id: task_calendar
-    name: 日历 ICS
-    description: 强对比 · 生成 ICS 日历事件
+    name: Calendar ICS
+    description: strong contrast · generate ICS calendar event
     request: |
       You do not have access to real calendars. Simulate creating a calendar event by writing an ICS (iCalendar) file in the workspace. Use the instructions below and treat them as the user request.
 
@@ -39,41 +39,41 @@ tasks:
   - id: task_dockerfile_optimization
     source: pinchbench
     pinchbench_task_id: task_dockerfile_optimization
-    name: Dockerfile 优化
-    description: 强对比 · coding（~88s）
+    name: Dockerfile optimize
+    description: strong contrast · coding (~88s)
     request: |
       Optimize the Dockerfile per the task spec (loaded from PinchBench).
 
-  # === 备选（对比强但 flaky，现场需预热挑一次）===
+  # === Backup (strong but flaky; warm up and pick a good run) ===
   - id: task_git_rescue_recovery
     source: pinchbench
     pinchbench_task_id: task_git_rescue_recovery
-    name: Git 恢复
-    description: 备选 · git 状态恢复（flaky）
+    name: Git rescue
+    description: backup · git state recovery (flaky)
     request: |
       Recover the git repository state per the task spec (loaded from PinchBench).
 
-  # === 冒烟（连通性，无对比价值）===
+  # === Smoke (connectivity only, no contrast value) ===
   - id: task_files
     source: pinchbench
     pinchbench_task_id: task_files
-    name: 项目结构
-    description: 冒烟 · 建 src/main.py、README、.gitignore
+    name: Project files
+    description: smoke · create src/main.py, README, .gitignore
     request: |
       Create a project structure with: src/ directory, src/main.py with hello world, README.md with project title, and .gitignore ignoring __pycache__.
 
   - id: task_weather
     source: pinchbench
     pinchbench_task_id: task_weather
-    name: 天气脚本
-    description: 冒烟 · 建 weather.py
+    name: Weather script
+    description: smoke · create weather.py
     request: |
       Create a Python script called weather.py that fetches weather data for San Francisco using the wttr.in API and prints a summary.
 
   - id: task_sanity
     source: pinchbench
     pinchbench_task_id: task_sanity
-    name: 连通检查
-    description: 冒烟 · 确认 agent 能响应
+    name: Sanity check
+    description: smoke · confirm the agent responds
     request: |
       Say "Hello, I'm ready!" to confirm you can respond.
