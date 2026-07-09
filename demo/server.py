@@ -194,7 +194,13 @@ async def api_run_events(run_id: str) -> StreamingResponse:
 
 @app.get("/")
 def index() -> FileResponse:
-    return FileResponse(STATIC_DIR / "index.html")
+    # Never cache the HTML shell: it carries the ?v= cache-busting query for
+    # app.js/style.css, so the browser must always re-fetch it to pick up new
+    # front-end builds (otherwise a stale index keeps requesting old JS).
+    return FileResponse(
+        STATIC_DIR / "index.html",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
 
 
 if STATIC_DIR.is_dir():

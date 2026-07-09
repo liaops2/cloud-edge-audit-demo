@@ -140,27 +140,29 @@ class DemoRunner:
             return self._run_crewpi_freeform(crewpi_mode)
 
         self.emitter.skip("recall", message="CrewPi memory off by default")
+        # Light each pipeline box only when its stage actually starts. For crewpi
+        # the trace poller streams plan->execute->audit transitions live (see
+        # _crewpi_progress); pi_only has no cloud stages, so only execute runs.
         if crewpi_mode == "pi_only":
             self.emitter.skip("plan", message="CrewPi Pi-only: skip cloud planning")
             self.emitter.skip("audit", message="CrewPi Pi-only: skip cloud audit")
+            self._guard_cancel()
+            self.emitter.running(
+                "execute",
+                message="CrewPi Pi-only → local Pi agent…",
+                payload={"prompt_preview": preview_text(self.state.user_request, 400)},
+            )
+            on_progress = None
         else:
+            self._guard_cancel()
             self.emitter.running("plan", message="CrewPi cloud planning…")
-            self.emitter.running("audit", message="CrewPi cloud audit pending…")
+            on_progress = self._crewpi_progress
 
-        self._guard_cancel()
-        self.emitter.running(
-            "execute",
-            message=(
-                "CrewPi Pi-only → local Pi agent…"
-                if crewpi_mode == "pi_only"
-                else "CrewPi plan/execute/audit → local Pi agent…"
-            ),
-            payload={"prompt_preview": preview_text(self.state.user_request, 400)},
-        )
         result = run_crewpi_pinchbench_task(
             task_id=self.state.pinchbench_task_id,
             mode=crewpi_mode,
             run_id=self.state.run_id,
+            on_progress=on_progress,
         )
         self._guard_cancel()
         self.state.execution_result = result.execution_result
@@ -193,40 +195,61 @@ class DemoRunner:
                 payload=execute_payload,
             )
         else:
+            reason = result.execution_error or f"execution below bar: {result.status}"
             self.emitter.fail(
                 "execute",
-                message=f"CrewPi execution below bar: {result.status}",
+                message=f"CrewPi execution failed — {reason}",
                 payload={
                     **execute_payload,
                     "issues": result.grade.issues,
+                    "reason": reason,
                 },
             )
         self._emit_score(result.grade)
         return self.state
 
+    def _crewpi_progress(self, stage: str, status: str) -> None:
+        """Stream live stage transitions from the crewpi trace poller.
+
+        Called from a background thread; the emitter marshals events back onto
+        the event loop, so this is safe to call off-thread. The authoritative
+        pass/fail resolution still happens after run_task returns.
+        """
+        messages = {
+            ("plan", "pass"): "CrewPi planning done",
+            ("execute", "running"): "CrewPi executing on local Pi agent…",
+            ("audit", "running"): "CrewPi cloud audit reviewing reported results…",
+        }
+        message = messages.get((stage, status), "")
+        if status == "pass":
+            self.emitter.pass_(stage, message=message)
+        else:
+            self.emitter.running(stage, message=message)
+
     def _run_crewpi_freeform(self, crewpi_mode: str) -> DemoRunState:
         self.emitter.skip("recall", message="CrewPi memory off by default")
+        # Same sequential-lighting rule as the pinchbench path: light each box
+        # only when its stage actually starts (see _crewpi_progress).
         if crewpi_mode == "pi_only":
             self.emitter.skip("plan", message="CrewPi Pi-only: skip cloud planning")
             self.emitter.skip("audit", message="CrewPi Pi-only: skip cloud audit")
+            self._guard_cancel()
+            self.emitter.running(
+                "execute",
+                message="CrewPi Pi-only → local Pi agent…",
+                payload={"prompt_preview": preview_text(self.state.user_request, 400)},
+            )
+            on_progress = None
         else:
+            self._guard_cancel()
             self.emitter.running("plan", message="CrewPi cloud planning…")
-            self.emitter.running("audit", message="CrewPi cloud audit pending…")
+            on_progress = self._crewpi_progress
 
-        self._guard_cancel()
-        self.emitter.running(
-            "execute",
-            message=(
-                "CrewPi Pi-only → local Pi agent…"
-                if crewpi_mode == "pi_only"
-                else "CrewPi plan/execute/audit → local Pi agent…"
-            ),
-            payload={"prompt_preview": preview_text(self.state.user_request, 400)},
-        )
         result = run_crewpi_freeform_task(
             goal=self.state.user_request,
             mode=crewpi_mode,
             run_id=self.state.run_id,
+            on_progress=on_progress,
         )
         self._guard_cancel()
         self.state.execution_result = result.execution_result
@@ -249,7 +272,12 @@ class DemoRunner:
         if execution_ok:
             self.emitter.pass_("execute", message="CrewPi execution done", payload=exec_payload)
         else:
-            self.emitter.fail("execute", message=f"CrewPi execution incomplete: {result.status}", payload=exec_payload)
+            reason = result.execution_error or f"execution incomplete: {result.status}"
+            self.emitter.fail(
+                "execute",
+                message=f"CrewPi execution failed — {reason}",
+                payload={**exec_payload, "reason": reason},
+            )
 
         self._emit_audit_score(crewpi_mode, result)
         return self.state

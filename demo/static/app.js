@@ -21,8 +21,8 @@ let modeSummaryEl = null;
 const DEFAULT_OFFICIAL_PROMPT = `Create a project structure with: src/ directory, src/main.py with hello world, README.md with project title, and .gitignore ignoring __pycache__.`;
 
 const MODE_HINTS = {
-  local_direct: "OpenClaw + Qwen 0.8B 64K",
-  cloud_edge: "OpenClaw + DeepSeek + Qwen 0.8B 64K",
+  local_direct: "Edge only · Qwen 0.8B 64K",
+  cloud_edge: "Cloud plan+audit (DeepSeek) · Qwen 0.8B edge",
 };
 
 const MODE_LABELS = {
@@ -227,12 +227,28 @@ function renderScoreBlock(container, payload, status) {
       <div class="score-inline__label">${passed ? "Done" : "Score"}${type}</div>
     </div>
   `;
-  const issues = payload.issues || [];
-  if (issues.length) {
+  const breakdown = payload.breakdown || {};
+  const entries = Object.entries(breakdown);
+  if (entries.length) {
+    // Show every sub-criterion with its score (pass/fail), not just failures.
     const ul = document.createElement("ul");
-    ul.className = "issue-list";
-    ul.innerHTML = issues.map((i) => `<li>${escapeHtml(i)}</li>`).join("");
+    ul.className = "breakdown-list";
+    ul.innerHTML = entries
+      .map(([k, v]) => {
+        const ok = Number(v) >= 1;
+        const val = Number.isInteger(Number(v)) ? Number(v) : Number(v).toFixed(2);
+        return `<li class="${ok ? "bd-ok" : "bd-fail"}"><span class="bd-mark">${ok ? "✓" : "✗"}</span><span class="bd-name">${escapeHtml(k)}</span><span class="bd-score">${val}</span></li>`;
+      })
+      .join("");
     block.appendChild(ul);
+  } else {
+    const issues = payload.issues || [];
+    if (issues.length) {
+      const ul = document.createElement("ul");
+      ul.className = "issue-list";
+      ul.innerHTML = issues.map((i) => `<li>${escapeHtml(i)}</li>`).join("");
+      block.appendChild(ul);
+    }
   }
   container.appendChild(block);
 }
@@ -436,6 +452,13 @@ async function sendMessage() {
     pass_score: config?.pass_score ?? 7,
     max_reworks: 1,
   };
+  // If the message is an unedited PinchBench prompt, bind its task_id so the
+  // backend runs the graded pinchbench path (with a full sub-criteria
+  // breakdown) instead of falling back to the free-form audit-gate path.
+  const selectedTask = getSelectedPromptTask();
+  if (selectedTask && text === (selectedTask.request || "").trim()) {
+    body.task_id = selectedTask.id;
+  }
 
   let res;
   try {

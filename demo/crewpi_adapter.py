@@ -5,9 +5,11 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 from demo.events import preview_text
 from demo.pinchbench_scoring import PinchBenchGrade
@@ -33,6 +35,9 @@ class CrewPiDemoResult:
     audit_status: str | None = None
     audit_confidence: float | None = None
     audit_findings: list[str] | None = None
+    # Concrete reason the edge execution failed (e.g. "timed out after 15s"),
+    # read from the trace. Surfaced so a failed run explains WHY, not just "failed".
+    execution_error: str | None = None
 
 
 def crewpi_enabled() -> bool:
@@ -55,6 +60,7 @@ def run_crewpi_pinchbench_task(
     task_id: str,
     mode: CrewPiMode,
     run_id: str,
+    on_progress: Callable[[str, str], None] | None = None,
 ) -> CrewPiDemoResult:
     _prepare_crewpi_imports()
     _load_crewpi_env()
@@ -81,28 +87,45 @@ def run_crewpi_pinchbench_task(
             else _build_demo_planning_goal
         )
 
-    result = run_task(
-        pinchbench_dir=pinchbench_dir,
-        task_id=task_id,
-        workspace_root=data_root / "workspaces",
-        trace_dir=data_root / "traces",
-        results_dir=data_root / "results",
-        runner=runner,
-        run_id=run_id,
-        planner_client=planner_client,
-        auditor_client=audit_judge_client,
-        judge_client=audit_judge_client if mode == "crewpi" else None,
-        cloud_control_max_validation_retries=int(os.environ.get("DEMO_CREWPI_VALIDATION_RETRIES", "5")),
-        judge_max_validation_retries=int(os.environ.get("DEMO_CREWPI_JUDGE_RETRIES", "5")),
-        execution_mode=mode,
-        segmented=mode == "crewpi" and crewpi_segmented_enabled(),
-    )
+    trace_dir = data_root / "traces"
+    stop_poll = threading.Event()
+    poller: threading.Thread | None = None
+    if on_progress is not None and mode == "crewpi":
+        poller = threading.Thread(
+            target=_poll_trace_progress,
+            args=(trace_dir / f"{run_id}.jsonl", on_progress, stop_poll),
+            daemon=True,
+        )
+        poller.start()
+
+    try:
+        result = run_task(
+            pinchbench_dir=pinchbench_dir,
+            task_id=task_id,
+            workspace_root=data_root / "workspaces",
+            trace_dir=trace_dir,
+            results_dir=data_root / "results",
+            runner=runner,
+            run_id=run_id,
+            planner_client=planner_client,
+            auditor_client=audit_judge_client,
+            judge_client=audit_judge_client if mode == "crewpi" else None,
+            cloud_control_max_validation_retries=int(os.environ.get("DEMO_CREWPI_VALIDATION_RETRIES", "5")),
+            judge_max_validation_retries=int(os.environ.get("DEMO_CREWPI_JUDGE_RETRIES", "5")),
+            execution_mode=mode,
+            segmented=mode == "crewpi" and crewpi_segmented_enabled(),
+        )
+    finally:
+        stop_poll.set()
+        if poller is not None:
+            poller.join(timeout=1.0)
     raw = result.to_dict()
     transcript_path = Path(raw["transcript_path"])
     execution_result = _read_transcript_text(transcript_path)
     grade = _grade_from_crewpi(raw)
     trace_path = Path(raw["crewpi_trace_path"])
     audit_status, audit_confidence, audit_findings = _read_last_audit(trace_path)
+    execution_error = _read_execution_error(trace_path)
     return CrewPiDemoResult(
         run_id=str(raw["run_id"]),
         task_id=str(raw["task_id"]),
@@ -118,7 +141,76 @@ def run_crewpi_pinchbench_task(
         audit_status=audit_status,
         audit_confidence=audit_confidence,
         audit_findings=audit_findings,
+        execution_error=execution_error,
     )
+
+
+def _read_execution_error(trace_path: Path) -> str | None:
+    """Pull the concrete edge-execution failure reason from the trace.
+
+    The `execution` events carry an `error` field (e.g. a timeout message) that
+    explains WHY a run failed; the result dict does not surface it. Returns the
+    last non-empty execution error, or None if the run executed cleanly.
+    """
+    if not trace_path.is_file():
+        return None
+    last_error: str | None = None
+    try:
+        lines = trace_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    for line in lines:
+        try:
+            event = json.loads(line)
+        except (ValueError, TypeError):
+            continue
+        if (event.get("type") or event.get("event")) == "execution":
+            err = (event.get("data") or {}).get("error")
+            if isinstance(err, str) and err.strip():
+                last_error = err.strip()
+    return last_error
+
+
+def _poll_trace_progress(
+    trace_path: Path,
+    on_progress: Callable[[str, str], None],
+    stop_event: threading.Event,
+) -> None:
+    """Tail the run's JSONL trace and fire stage transitions as they happen.
+
+    run_task is one blocking call, so without this the plan/execute/audit boxes
+    all light at once. We watch the trace for the events that mark each stage
+    boundary and stream them to the UI:
+        planning_completed -> plan done, execution starts
+        audit              -> cloud audit starts reviewing
+    """
+    triggers: dict[str, list[tuple[str, str]]] = {
+        "planning_completed": [("plan", "pass"), ("execute", "running")],
+        "audit": [("audit", "running")],
+    }
+    seen: set[str] = set()
+    while not stop_event.is_set():
+        if trace_path.is_file():
+            try:
+                lines = trace_path.read_text(encoding="utf-8").splitlines()
+            except OSError:
+                lines = []
+            for line in lines:
+                try:
+                    ev = json.loads(line)
+                except (ValueError, TypeError):
+                    continue
+                et = ev.get("type") or ev.get("event")
+                if et in triggers and et not in seen:
+                    seen.add(et)
+                    for stage, status in triggers[et]:
+                        try:
+                            on_progress(stage, status)
+                        except Exception:  # noqa: BLE001 - never let UI break the run
+                            pass
+            if seen >= set(triggers):
+                return
+        stop_event.wait(0.4)
 
 
 def _read_last_audit(trace_path: Path) -> tuple[str | None, float | None, list[str]]:
@@ -212,6 +304,7 @@ class CrewPiFreeformResult:
     execution_result: str
     workspace: Path
     trace_path: Path
+    execution_error: str | None = None
 
 
 def run_crewpi_freeform_task(
@@ -219,6 +312,7 @@ def run_crewpi_freeform_task(
     goal: str,
     mode: CrewPiMode,
     run_id: str,
+    on_progress: Callable[[str, str], None] | None = None,
 ) -> CrewPiFreeformResult:
     """Run a free-form (non-PinchBench) request through CrewPi.
 
@@ -277,9 +371,23 @@ def run_crewpi_freeform_task(
             if crewpi_segmented_enabled()
             else orchestrator.run
         )
-        result = asyncio.run(
-            orchestrator_run(goal=goal, workspace_dir=str(workspace), run_id=run_id)
-        )
+        stop_poll = threading.Event()
+        poller: threading.Thread | None = None
+        if on_progress is not None:
+            poller = threading.Thread(
+                target=_poll_trace_progress,
+                args=(trace_dir / f"{run_id}.jsonl", on_progress, stop_poll),
+                daemon=True,
+            )
+            poller.start()
+        try:
+            result = asyncio.run(
+                orchestrator_run(goal=goal, workspace_dir=str(workspace), run_id=run_id)
+            )
+        finally:
+            stop_poll.set()
+            if poller is not None:
+                poller.join(timeout=1.0)
         status = str(result.status)
         audit_pass = result.status == RunStatus.DONE
         last_audit = result.audits[-1] if result.audits else None
@@ -306,6 +414,7 @@ def run_crewpi_freeform_task(
         status = "done" if execution.ok else "failed"
         execution_result = execution.output or (execution.error or "")
 
+    trace_path = trace_dir / f"{run_id}.jsonl"
     return CrewPiFreeformResult(
         run_id=run_id,
         mode=mode,
@@ -316,7 +425,8 @@ def run_crewpi_freeform_task(
         audit_findings=audit_findings,
         execution_result=execution_result,
         workspace=workspace,
-        trace_path=trace_dir / f"{run_id}.jsonl",
+        trace_path=trace_path,
+        execution_error=_read_execution_error(trace_path),
     )
 
 
